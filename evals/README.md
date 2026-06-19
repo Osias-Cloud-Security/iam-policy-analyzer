@@ -30,11 +30,3 @@ negatives are deliberate near-misses that share keywords but need something
 else: policy *authoring*, SCPs, resource-based policies, live-account auditing,
 format conversion, and conceptual questions. Run each a few times and compute a
 trigger rate (pass threshold 0.5).
-
-## Note for maintainers
-
-Case 3 is the false-positive baseline and intentionally avoids S3 actions: the
-engine's `BROAD_S3_DATA_ACCESS` rule currently matches *any* `s3:*`-shaped
-action on `Resource: "*"`, so even a read-only `s3:ListAllMyBuckets` is flagged.
-That latent false-positive is a candidate to fix in the rule engine — if fixed,
-this fixture can be broadened to include read-only S3 actions.

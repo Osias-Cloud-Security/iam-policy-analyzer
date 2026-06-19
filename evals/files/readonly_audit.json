@@ -9,6 +9,8 @@
         "ec2:DescribeSecurityGroups",
         "iam:GetRole",
         "iam:ListRoles",
+        "s3:ListAllMyBuckets",
+        "s3:GetBucketLocation",
         "cloudtrail:LookupEvents"
       ],
       "Resource": "*"

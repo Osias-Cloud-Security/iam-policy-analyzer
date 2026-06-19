@@ -45,7 +45,7 @@ statements), not from one block.
 | `SERVICE_WILDCARD_<SVC>` | `<svc>:*` for a sensitive service (`iam`, `kms`, `secretsmanager`, `ssm`, `s3`, `ec2`, `lambda`, `cloudformation`, `organizations`, `sts`) | HIGH |
 | `STS_ASSUME_ROLE` | `sts:AssumeRole` / `…WithSAML` / `…WithWebIdentity` | HIGH if `Resource:"*"`, else MEDIUM |
 | `SENSITIVE_DATA_ACCESS` | Secret/parameter/decrypt reads (`secretsmanager:GetSecretValue`, `ssm:GetParameter(s)`, `kms:Decrypt`) | HIGH if `Resource:"*"`, else MEDIUM |
-| `BROAD_S3_DATA_ACCESS` | `s3:GetObject`/`PutObject`/`DeleteObject`/`s3:*` with `Resource:"*"` | HIGH |
+| `BROAD_S3_DATA_ACCESS` | An S3 object data action (`s3:GetObject`/`PutObject`/`DeleteObject`) **or** a grant of the S3 service wildcard (`s3:*` or `*`), with `Resource:"*"`. Read-only S3 actions (e.g. `s3:ListAllMyBuckets`) do **not** trigger this on their own. | HIGH |
 | `WRITE_ON_ALL_RESOURCES` | Any non-read-only action with `Resource:"*"` | HIGH |
 | `ALLOW_NOTACTION` | An `Allow` statement uses `NotAction` | HIGH |
 | `ALLOW_NOTRESOURCE` | An `Allow` statement uses `NotResource` | HIGH |
