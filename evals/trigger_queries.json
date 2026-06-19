@@ -1,0 +1,23 @@
+[
+  { "query": "can you check whether this IAM policy is over-permissioned? {\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":\"*\",\"Resource\":\"*\"}]}", "should_trigger": true },
+  { "query": "I've got a role trust policy in infra/iam.tf — is anyone able to assume this role that shouldn't be?", "should_trigger": true },
+  { "query": "review roles.json for least privilege before I attach it", "should_trigger": true },
+  { "query": "does the inline policy below let someone escalate to admin? paste: iam:PassRole on * plus lambda:CreateFunction", "should_trigger": true },
+  { "query": "security flagged our ci-pipeline.tf — are the iam permissions defined in there too broad?", "should_trigger": true },
+  { "query": "is `Action: *` in this policy actually dangerous or am i overthinking it", "should_trigger": true },
+  { "query": "here's a cloudformation template — can you tell me if the IAM roles it defines are safe to deploy?", "should_trigger": true },
+  { "query": "i think this trust policy trusts a whole account with no externalid, whats the blast radius here", "should_trigger": true },
+  { "query": "audit the permissions in policy_v2_final.json before i ship it to prod", "should_trigger": true },
+  { "query": "I'm setting up a deploy role — here's the policy JSON; before I terraform apply, can you sanity-check it isn't wildly over-permissioned?", "should_trigger": true },
+
+  { "query": "write me an IAM policy that lets a lambda read objects from one specific S3 bucket", "should_trigger": false },
+  { "query": "what's the difference between an SCP and an IAM identity policy?", "should_trigger": false },
+  { "query": "audit my live AWS account for unused IAM roles and stale access keys", "should_trigger": false },
+  { "query": "review this S3 bucket policy and tell me if it's exposing the bucket publicly", "should_trigger": false },
+  { "query": "this SCP is blocking my devs from launching EC2 instances — how do I fix the SCP?", "should_trigger": false },
+  { "query": "convert this IAM policy JSON into a terraform aws_iam_policy_document data block", "should_trigger": false },
+  { "query": "what IAM permissions does `aws s3 sync` need to work?", "should_trigger": false },
+  { "query": "rotate the access keys for my iam user and update the .env", "should_trigger": false },
+  { "query": "can you run terraform apply to create the iam role in main.tf?", "should_trigger": false },
+  { "query": "explain how sts:AssumeRole and role chaining actually work", "should_trigger": false }
+]
