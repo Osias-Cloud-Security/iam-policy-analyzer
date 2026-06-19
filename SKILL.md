@@ -1,6 +1,6 @@
 ---
 name: iam-policy-analyzer
-description: Analyze one or more AWS IAM policies for security risk — least privilege violations, privilege escalation paths, and blast radius — and produce a plain-language report with prioritized recommendations per policy. Use when the user pastes or points to IAM policies / trust policies / inline policies, or to a file that defines them (any Terraform .tf file using jsonencode/heredoc/aws_iam_policy_document, CloudFormation templates, multiple JSON policies), and asks whether they are safe, over-permissioned, escalatable, or follow least privilege. Pairs a deterministic rule engine with careful, non-speculative phrasing. Not for SCPs, resource policies evaluated against principals, or live account auditing.
+description: Analyze one or more AWS IAM policies for security risk — least privilege violations, privilege escalation paths, and blast radius — and produce a plain-language report with prioritized recommendations per policy. Use when the user pastes or points to IAM policies / trust policies / inline policies, or to a file that defines them (any Terraform .tf file using jsonencode/heredoc/aws_iam_policy_document, CloudFormation templates, multiple JSON policies), and asks whether they are safe, over-permissioned, escalatable, or follow least privilege. Not for SCPs, resource policies evaluated against principals, or live account auditing.
 ---
 
 # IAM Policy Analyzer

@@ -42,6 +42,14 @@ import re
 import sys
 from typing import Any, Dict, List, Set, Tuple
 
+# Process exit codes. Note: a per-policy `valid: false` (malformed JSON content,
+# no Statement, etc.) is a legitimate analysis RESULT carried in the output JSON,
+# NOT a script failure — so it does not change the exit code. Non-zero is reserved
+# for the script being unable to do its job at all.
+EXIT_OK = 0          # analysis completed for every input; results emitted
+EXIT_NO_INPUT = 1    # nothing to analyze (empty stdin / no policy provided)
+EXIT_READ_ERROR = 2  # at least one named file could not be read
+
 READ_ONLY_PREFIXES = ("describe", "get", "list", "lookup", "view")
 
 SENSITIVE_WILDCARD_SERVICES = {
@@ -756,6 +764,14 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description="Deterministic AWS IAM policy rule engine. Scores one or "
                     "more IAM policy documents independently.",
+        epilog=(
+            "Exit codes:\n"
+            f"  {EXIT_OK}  analysis completed; results emitted as JSON (a per-policy\n"
+            "     \"valid\": false is a normal finding, not a failure)\n"
+            f"  {EXIT_NO_INPUT}  nothing to analyze (empty stdin / no policy provided)\n"
+            f"  {EXIT_READ_ERROR}  at least one named file could not be read"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
         "policies", nargs="*",
@@ -764,6 +780,7 @@ def main() -> int:
     args = parser.parse_args()
 
     inputs: List[Tuple[str, Any]] = []
+    had_read_error = False
 
     if args.policies:
         for path in args.policies:
@@ -772,13 +789,14 @@ def main() -> int:
                     text = fh.read()
             except OSError as exc:
                 inputs.append((path, _ReadError(f"Could not read policy: {exc}")))
+                had_read_error = True
                 continue
             inputs.extend(_collect(text, path))
     else:
         text = sys.stdin.read()
         if not text.strip():
             print(json.dumps({"policies": [_invalid("stdin", "No policy provided.")]}, indent=2))
-            return 1
+            return EXIT_NO_INPUT
         inputs.extend(_collect(text, "stdin"))
 
     results: List[Dict[str, Any]] = []
@@ -789,7 +807,10 @@ def main() -> int:
             results.append(_analyze_value(source, value))
 
     print(json.dumps({"policies": results}, indent=2))
-    return 0 if all(r["valid"] for r in results) else 1
+    # A malformed policy is a legitimate result (carried in the JSON), so it does
+    # NOT fail the run. Only an unreadable input file — the script being unable to
+    # do its job — yields a non-zero exit.
+    return EXIT_READ_ERROR if had_read_error else EXIT_OK
 
 
 if __name__ == "__main__":
