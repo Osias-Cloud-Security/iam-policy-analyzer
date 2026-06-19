@@ -88,6 +88,10 @@ The skill follows three principles:
 
 Strictly IAM **identity** policies (managed or inline) and role **trust** policies. Service resource-based policies (S3 bucket, KMS key, SQS, SNS, Lambda, DynamoDB) are **out of scope** — they're detected and returned as `NOT_ANALYZED`, not scored. Service control policies (SCPs) and live account auditing are also out of scope.
 
+## Disclaimer
+
+The report is **AI-generated and can miss things** — it is a first-pass review, not an authoritative audit. Always have a qualified engineer review any changes before applying them.
+
 ## License
 
 [MIT](LICENSE).
