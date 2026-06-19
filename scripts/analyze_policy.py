@@ -765,6 +765,12 @@ def main() -> int:
         description="Deterministic AWS IAM policy rule engine. Scores one or "
                     "more IAM policy documents independently.",
         epilog=(
+            "Input (as file args or piped to stdin): a single policy document, a JSON\n"
+            "array of policy documents, or a manifest — a JSON array of\n"
+            "{\"source\": \"label\", \"policy\": <policy>} objects, where <policy> is a\n"
+            "policy object or a JSON string. The manifest is the primary interface;\n"
+            "\"source\" labels each result.\n"
+            "\n"
             "Exit codes:\n"
             f"  {EXIT_OK}  analysis completed; results emitted as JSON (a per-policy\n"
             "     \"valid\": false is a normal finding, not a failure)\n"
