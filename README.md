@@ -37,7 +37,7 @@ You get a per-policy risk level (LOW / MEDIUM / HIGH / CRITICAL) and specific fi
 ## Installation
 
 ```bash
-git clone https://github.com/<your-org>/iam-policy-analyzer.git ~/.claude/skills/iam-policy-analyzer
+git clone https://github.com/osias-cloud-security/iam-policy-analyzer.git ~/.claude/skills/iam-policy-analyzer
 ```
 
 This installs the skill globally — it's available in every project you open with Claude Code.
@@ -49,7 +49,7 @@ If you prefer to scope the skill to a single project instead of installing it gl
 ```bash
 cd your-project
 mkdir -p .claude/skills
-git clone https://github.com/<your-org>/iam-policy-analyzer.git .claude/skills/iam-policy-analyzer
+git clone https://github.com/osias-cloud-security/iam-policy-analyzer.git .claude/skills/iam-policy-analyzer
 ```
 
 Project-level skills live in `.claude/skills/` and are only active in that project.
