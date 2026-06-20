@@ -6,7 +6,7 @@ guidance. Two independent things are tested here.
 
 ## 1. Output quality — `evals.json`
 
-Six test cases, each a realistic prompt plus an `expected_output` and
+Seven test cases, each a realistic prompt plus an `expected_output` and
 objective `assertions`, covering the skill's distinct branches:
 
 | id | fixture | exercises |
@@ -17,6 +17,7 @@ objective `assertions`, covering the skill's distinct branches:
 | 4 | `files/wildcard_trust.json` | wildcard-principal trust policy → CRITICAL |
 | 5 | `files/s3_bucket_policy.json` | resource-based policy → out of scope / not analyzed |
 | 6 | `files/roles.tf` | extract two policies from Terraform, score each independently |
+| 7 | `files/s3_read_glob.json` | `s3:Get*` on `*` → HIGH (wildcard read glob covers s3:GetObject; not excused as read-only) |
 
 Run each prompt twice — once with the skill, once without — in a fresh context,
 then grade the output against the case's `assertions` (PASS/FAIL with evidence).
