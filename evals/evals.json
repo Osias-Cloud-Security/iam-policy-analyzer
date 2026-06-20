@@ -72,6 +72,18 @@
         "The ci role trust policy (ec2.amazonaws.com service principal) is treated as expected/benign and not given a high/critical rating",
         "Each policy gets its own independent assessment block — the report does not merge them into one combined risk verdict"
       ]
+    },
+    {
+      "id": 7,
+      "prompt": "Is the policy in evals/files/s3_read_glob.json over-permissioned? It only grants read access to S3.",
+      "expected_output": "A report identifying that s3:Get* on Resource \"*\" grants bulk read access to every S3 object in the account (a wildcard action that covers s3:GetObject), rated HIGH, with a recommendation to scope to specific object actions and bucket/prefix resources. Read-only framing does not make account-wide object reads safe.",
+      "files": ["evals/files/s3_read_glob.json"],
+      "assertions": [
+        "The report gives this policy an overall risk level of HIGH (it is not treated as harmless just because the actions are reads)",
+        "The report calls out that s3:Get* on Resource \"*\" allows reading the contents of every S3 object in the account (broad/bulk S3 object data access)",
+        "The report includes at least one prioritized recommendation to scope the actions (e.g. specific s3:GetObject) and/or the resource to specific buckets/prefixes",
+        "The report does not dismiss the policy as low risk on the grounds that it is read-only"
+      ]
     }
   ]
 }

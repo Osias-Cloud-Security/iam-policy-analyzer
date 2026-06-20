@@ -310,18 +310,19 @@ def analyze_iam_policy(policy_text: str) -> Dict[str, Any]:
                 idx,
             ))
 
-        # Broad S3 data access: an explicit object read/write/delete action, or a
-        # grant of the S3 service wildcard (s3:* or *). We check for the wildcard
-        # GRANT specifically via _contains_service_wildcard — matching actions
-        # against an "s3:*" glob would also match read-only actions like
-        # s3:ListAllMyBuckets and produce a false positive.
+        # Broad S3 data access: the statement grants an S3 object read/write/delete
+        # action — named exactly (s3:GetObject) OR via a wildcard that covers it
+        # (s3:Get*, s3:*, *). Coverage is tested with _action_matches(target, action)
+        # = fnmatch(target, action): the POLICY action is the glob (pattern) and the
+        # concrete object action is the candidate it may grant. Matching the other
+        # direction (an action against an "s3:*" pattern) would wrongly flag
+        # metadata-only reads like s3:ListAllMyBuckets, so we deliberately avoid it.
         grants_s3_object_data = any(
-            _action_matches(a, "s3:getobject")
-            or _action_matches(a, "s3:putobject")
-            or _action_matches(a, "s3:deleteobject")
+            _action_matches(target, a)
             for a in actions
+            for target in ("s3:getobject", "s3:putobject", "s3:deleteobject")
         )
-        if (grants_s3_object_data or _contains_service_wildcard(actions, "s3")) and _has_wildcard_resource(resources):
+        if grants_s3_object_data and _has_wildcard_resource(resources):
             findings.append(_make_finding(
                 "BROAD_S3_DATA_ACCESS",
                 "Broad S3 data access is allowed",
