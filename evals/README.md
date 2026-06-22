@@ -6,7 +6,7 @@ guidance. Two independent things are tested here.
 
 ## 1. Output quality — `evals.json`
 
-Seven test cases, each a realistic prompt plus an `expected_output` and
+Nine test cases, each a realistic prompt plus an `expected_output` and
 objective `assertions`, covering the skill's distinct branches:
 
 | id | fixture | exercises |
@@ -18,6 +18,8 @@ objective `assertions`, covering the skill's distinct branches:
 | 5 | `files/s3_bucket_policy.json` | resource-based policy → out of scope / not analyzed |
 | 6 | `files/roles.tf` | extract two policies from Terraform, score each independently |
 | 7 | `files/s3_read_glob.json` | `s3:Get*` on `*` → HIGH (wildcard read glob covers s3:GetObject; not excused as read-only) |
+| 8 | `files/cfn_cross_account.yaml` | CloudFormation **YAML**: extract trust + inline policies; wildcard principal narrowed by `aws:PrincipalOrgID` → HIGH; conditions are genuine scoping |
+| 9 | `files/cfn_ci_deploy_runner.json` | CloudFormation **JSON**: benign EC2 trust → LOW; inline policy CRITICAL with multiple escalation paths; conditions (`aws:UserAgent`, tag-on-PassRole) are weak/unreliable |
 
 Run each prompt twice — once with the skill, once without — in a fresh context,
 then grade the output against the case's `assertions` (PASS/FAIL with evidence).

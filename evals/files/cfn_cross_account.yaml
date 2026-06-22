@@ -1,0 +1,76 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Parameters:
+  OrgId:
+    Type: String
+    Default: "o-exampleorgid"
+  TargetBucketArn:
+    Type: String
+    Default: "arn:aws:s3:::integration-data-bucket"
+  VpcEndpointId:
+    Type: String
+    Default: "vpce-0abc123def456"
+  CorpCidr:
+    Type: String
+    Default: "203.0.113.0/24"
+
+Resources:
+
+  CrossAccountIntegrationRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: cross-account-integration-role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: "*"
+            Action: "sts:AssumeRole"
+            Condition:
+              StringEquals:
+                aws:PrincipalOrgID: !Ref OrgId
+      Policies:
+        - PolicyName: cross-account-integration-policy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+
+              - Effect: Allow
+                Action: "s3:*"
+                Resource:
+                  - !Ref TargetBucketArn
+                  - !Sub "${TargetBucketArn}/*"
+                Condition:
+                  StringEquals:
+                    aws:SourceVpce: !Ref VpcEndpointId
+
+              - Effect: Allow
+                Action: "iam:PassRole"
+                Resource: "*"
+                Condition:
+                  StringEquals:
+                    iam:PassedToService: "lambda.amazonaws.com"
+
+              - Effect: Allow
+                Action:
+                  - "kms:Decrypt"
+                  - "kms:Encrypt"
+                  - "kms:GenerateDataKey"
+                Resource: "*"
+                Condition:
+                  Bool:
+                    aws:MultiFactorAuthPresent: "true"
+
+              - Effect: Allow
+                Action:
+                  - "ec2:StartInstances"
+                  - "ec2:StopInstances"
+                  - "ec2:RebootInstances"
+                Resource: "*"
+                Condition:
+                  IpAddress:
+                    aws:SourceIp: !Ref CorpCidr
+
+Outputs:
+  RoleArn:
+    Value: !GetAtt CrossAccountIntegrationRole.Arn

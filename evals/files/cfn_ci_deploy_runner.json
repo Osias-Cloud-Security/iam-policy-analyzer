@@ -1,0 +1,81 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Parameters": {
+    "AttachableAdminPolicyArn": {
+      "Type": "String",
+      "Default": "arn:aws:iam::aws:policy/AdministratorAccess"
+    }
+  },
+  "Resources": {
+    "DeployRunnerRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "RoleName": "ci-deploy-runner-role",
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": { "Service": "ec2.amazonaws.com" },
+              "Action": "sts:AssumeRole"
+            }
+          ]
+        },
+        "Policies": [
+          {
+            "PolicyName": "ci-deploy-runner-policy",
+            "PolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "iam:CreatePolicyVersion",
+                    "iam:SetDefaultPolicyVersion"
+                  ],
+                  "Resource": "*",
+                  "Condition": {
+                    "StringEquals": { "aws:RequestedRegion": "us-east-1" }
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "iam:AttachUserPolicy",
+                    "iam:AttachRolePolicy"
+                  ],
+                  "Resource": "*",
+                  "Condition": {
+                    "StringLike": { "aws:UserAgent": "*aws-cli*" }
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": "iam:CreateAccessKey",
+                  "Resource": "*"
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "lambda:CreateFunction",
+                    "lambda:InvokeFunction",
+                    "iam:PassRole"
+                  ],
+                  "Resource": "*",
+                  "Condition": {
+                    "StringEquals": { "aws:ResourceTag/env": "dev" }
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  },
+  "Outputs": {
+    "RoleArn": {
+      "Value": { "Fn::GetAtt": ["DeployRunnerRole", "Arn"] }
+    }
+  }
+}

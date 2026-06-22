@@ -7,9 +7,17 @@ Analyzes one or more AWS IAM policy documents (JSON) and prints a JSON object:
 
     {"policies": [
         {"source": "...", "valid": true, "parse_error": null,
-         "findings": [...], "summary": {"risk_level": "..."}},
+         "analysis_status": "COMPLETE|INVALID|NOT_ANALYZED",
+         "findings": [...], "summary": {"risk_level": "...|null"},
+         "explicit_deny_present": false, "effective_permissions_calculated": false,
+         "invalid_statements": [...]},  # present only when status is INVALID
         ...
     ]}
+
+`analysis_status` is separate from risk:
+  - COMPLETE     — every statement analyzable; risk_level set.
+  - INVALID      — malformed document or a schema-violating statement
+  - NOT_ANALYZED — out-of-scope resource-based policy; risk_level null.
 
 Unit of analysis is the whole policy DOCUMENT (its Version plus the entire
 Statement array, however many statement blocks / Sids it contains). Each
@@ -63,6 +71,20 @@ POLICY_MUTATION_ACTIONS = {
     "iam:putrolepolicy", "iam:putuserpolicy", "iam:putgrouppolicy",
 }
 
+# Credential-access escalation (obtain another principal's credentials, no
+# policy edit needed). Graded by Resource scope, like PassRole.
+CREDENTIAL_ESCALATION_ACTIONS = {
+    "iam:createaccesskey", "iam:createloginprofile", "iam:updateloginprofile",
+    "iam:addusertogroup", "iam:updateassumerolepolicy",
+}
+
+# Permissions-boundary mutation. A boundary caps an entity's max permissions;
+# loosening (Put) or removing (Delete) one's own boundary lifts that cap.
+PERMISSIONS_BOUNDARY_ACTIONS = {
+    "iam:putuserpermissionsboundary", "iam:putrolepermissionsboundary",
+    "iam:deleteuserpermissionsboundary", "iam:deleterolepermissionsboundary",
+}
+
 PASSROLE_ACTION = "iam:passrole"
 
 ASSUME_ROLE_ACTIONS = {
@@ -74,11 +96,18 @@ SECRETS_ACTIONS = {
     "ssm:getparametersbypath", "kms:decrypt",
 }
 
+# Data-plane reads with a read-prefix verb that return data, not metadata.
+# Flagged only at Resource "*"; scoped reads are routine.
+SENSITIVE_READ_ACTIONS = {
+    "dynamodb:getitem", "dynamodb:batchgetitem", "dynamodb:query", "dynamodb:scan",
+    "lambda:getfunction",
+}
+
 # Actions that launch/configure a compute resource which then runs code under a
 # *passed* role. Combined with iam:PassRole this is a privilege-escalation
-# primitive. This list is representative, not exhaustive — the agent should treat
-# any "create/configure a resource that runs with a passed role" action (e.g.
-# Batch, CodeBuild, EMR) as the same class via judgment.
+# primitive. Representative, not exhaustive — treat any other "create/configure a
+# resource that runs with a passed role" action the same
+# by judgment.
 COMPUTE_ROLE_INJECTION_ACTIONS = {
     "lambda:createfunction", "lambda:updatefunctionconfiguration",
     "ec2:runinstances", "cloudformation:createstack",
@@ -86,6 +115,9 @@ COMPUTE_ROLE_INJECTION_ACTIONS = {
     "ecs:registertaskdefinition",
     "sagemaker:createtrainingjob", "sagemaker:createnotebookinstance",
     "sagemaker:createprocessingjob",
+    "codebuild:createproject", "codebuild:updateproject",
+    "batch:registerjobdefinition", "emr:runjobflow",
+    "states:createstatemachine", "datapipeline:putpipelinedefinition",
 }
 
 # --- Trust-policy (Principal-aware) analysis ------------------------------
@@ -135,10 +167,6 @@ def _has_conditions(statement: Dict[str, Any]) -> bool:
     return isinstance(cond, dict) and len(cond) > 0
 
 
-def _is_allow(statement: Dict[str, Any]) -> bool:
-    return str(statement.get("Effect", "")).strip().lower() == "allow"
-
-
 def _is_deny(statement: Dict[str, Any]) -> bool:
     return str(statement.get("Effect", "")).strip().lower() == "deny"
 
@@ -176,9 +204,11 @@ def _looks_read_only(action: str) -> bool:
 
 
 def _all_actions_read_only(actions: List[str]) -> bool:
-    if not actions:
+    # `*` is non-read-only; treating it as read-only would vacuously pass the
+    # WRITE_ON_ALL_RESOURCES / WILDCARD_ACTIONS_AND_RESOURCES guards.
+    if not actions or any(action == "*" for action in actions):
         return False
-    return all(_looks_read_only(action) for action in actions if action != "*")
+    return all(_looks_read_only(action) for action in actions)
 
 
 def _statement_scope_note(statement: Dict[str, Any]) -> str:
@@ -192,9 +222,49 @@ def _statement_scope_note(statement: Dict[str, Any]) -> str:
     return "; ".join(parts)
 
 
+# Finding category — separates genuine defects from powerful-but-scoped
+# capabilities so a tightly-scoped grant is not mislabeled a vulnerability.
+#   SECURITY_RISK        — a broad/unsafe grant that is a defect on its own
+#   BROAD_PERMISSION     — wildcard breadth (service-wide / bulk data)
+#   PRIVILEGE_ESCALATION — can be chained to gain higher privilege
+#   SENSITIVE_CAPABILITY — a sensitive but scoped capability (review, not defect)
+_SECURITY_RISK_IDS = {
+    "FULL_ADMIN", "WILDCARD_ACTIONS_AND_RESOURCES", "WRITE_ON_ALL_RESOURCES",
+    "ALLOW_NOTACTION", "ALLOW_NOTRESOURCE",
+    "TRUST_PRINCIPAL_WILDCARD", "TRUST_ACCOUNT_ROOT", "TRUST_NOTPRINCIPAL",
+}
+_BROAD_PERMISSION_IDS = {"BROAD_S3_DATA_ACCESS"}
+_PRIVILEGE_ESCALATION_IDS = {
+    "IAM_PASSROLE", "IAM_POLICY_MUTATION", "COMPUTE_ROLE_INJECTION", "CREDENTIAL_ESCALATION",
+    "BOUNDARY_MUTATION",
+    "TRUST_CROSS_ACCOUNT_NO_EXTERNALID", "TRUST_FEDERATED_UNSCOPED", "TRUST_SAML_UNSCOPED",
+}
+_SENSITIVE_CAPABILITY_IDS = {"SENSITIVE_DATA_ACCESS"}
+
+
+def _category_for(finding_id: str, severity: str) -> str:
+    if finding_id.startswith("SERVICE_WILDCARD_"):
+        return "BROAD_PERMISSION"
+    if finding_id in _SECURITY_RISK_IDS:
+        return "SECURITY_RISK"
+    if finding_id in _BROAD_PERMISSION_IDS:
+        return "BROAD_PERMISSION"
+    if finding_id in _PRIVILEGE_ESCALATION_IDS:
+        return "PRIVILEGE_ESCALATION"
+    if finding_id in _SENSITIVE_CAPABILITY_IDS:
+        return "SENSITIVE_CAPABILITY"
+    # Scope-dependent: a scoped grant (MEDIUM) is a capability, not a defect.
+    if finding_id == "STS_ASSUME_ROLE":
+        return "PRIVILEGE_ESCALATION" if severity == "HIGH" else "SENSITIVE_CAPABILITY"
+    if finding_id == "COMPUTE_CONTROL":
+        return "BROAD_PERMISSION" if severity == "HIGH" else "SENSITIVE_CAPABILITY"
+    return "REVIEW_REQUIRED"
+
+
 def _make_finding(finding_id: str, title: str, severity: str, description: str, statement_index: int) -> Dict[str, Any]:
     return {
         "id": finding_id,
+        "category": _category_for(finding_id, severity),
         "title": title,
         "severity": severity,
         "description": description,
@@ -202,20 +272,117 @@ def _make_finding(finding_id: str, title: str, severity: str, description: str, 
     }
 
 
-def analyze_iam_policy(policy_text: str) -> Dict[str, Any]:
+# Statement validation (P1). A statement the engine cannot reason about must be
+# surfaced, never silently skipped — otherwise a malformed policy reads as a
+# clean LOW. `_DENY` marks a Deny statement: understood and intentionally not
+# acted on (not a defect, not a skip).
+_DENY = object()
+
+
+def _valid_str_or_list(value: Any) -> bool:
+    """True if value is the AWS-valid shape for Action/Resource: a string or a
+    list of strings."""
+    if isinstance(value, str):
+        return True
+    return isinstance(value, list) and all(isinstance(item, str) for item in value)
+
+
+def _statement_problem(raw_stmt: Any, is_trust: bool) -> Any:
+    """Returns None if the statement is analyzable, `_DENY` if it is a Deny
+    (skip cleanly), or a human-readable reason string if it is malformed."""
+    if not isinstance(raw_stmt, dict):
+        return "statement is not a JSON object"
+
+    effect = raw_stmt.get("Effect")
+    if effect is None:
+        return "statement has no Effect"
+    if not isinstance(effect, str) or effect.strip().lower() not in ("allow", "deny"):
+        return f"statement has an invalid Effect ({effect!r})"
+    if effect.strip().lower() == "deny":
+        return _DENY
+
+    for key in ("Action", "NotAction"):
+        if key in raw_stmt and not _valid_str_or_list(raw_stmt[key]):
+            return f"{key} has an invalid type"
+    if "Action" not in raw_stmt and "NotAction" not in raw_stmt:
+        return "statement has neither Action nor NotAction"
+    if "Condition" in raw_stmt and not isinstance(raw_stmt["Condition"], dict):
+        return "Condition has an invalid type"
+
+    if is_trust:
+        if "Principal" in raw_stmt and not isinstance(raw_stmt["Principal"], (str, dict)):
+            return "Principal has an invalid type"
+        if "Principal" not in raw_stmt and "NotPrincipal" not in raw_stmt:
+            return "trust statement has neither Principal nor NotPrincipal"
+    else:
+        for key in ("Resource", "NotResource"):
+            if key in raw_stmt and not _valid_str_or_list(raw_stmt[key]):
+                return f"{key} has an invalid type"
+        if "Resource" not in raw_stmt and "NotResource" not in raw_stmt:
+            return "statement has neither Resource nor NotResource"
+    return None
+
+
+def _validate_statements(statements: List[Any], is_trust: bool) -> List[Dict[str, Any]]:
+    """Returns [{statement_index, reason}] for every malformed statement. An
+    empty list means every statement is structurally analyzable. A malformed
+    statement makes the WHOLE policy invalid — AWS rejects such a policy on
+    submission, so the engine must not score a subset of it."""
+    invalid: List[Dict[str, Any]] = []
+    for idx, raw in enumerate(statements):
+        problem = _statement_problem(raw, is_trust)
+        if problem is _DENY or problem is None:
+            continue
+        invalid.append({"statement_index": idx, "reason": problem})
+    return invalid
+
+
+def _invalid_document(message: str) -> Dict[str, Any]:
+    """Result for a document the engine cannot parse/use at all. risk_level is
+    null (an unanalyzable document has no risk score), status INVALID."""
+    return {
+        "valid": False,
+        "parse_error": message,
+        "analysis_status": "INVALID",
+        "findings": [],
+        "summary": {"risk_level": None},
+    }
+
+
+def _invalid_statements_result(invalid: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Result when one or more statements are malformed: stop and report which,
+    rather than scoring the well-formed remainder."""
+    detail = "; ".join(f"statement[{e['statement_index']}]: {e['reason']}" for e in invalid)
+    result = _invalid_document(f"Policy cannot be analyzed — {detail}.")
+    result["invalid_statements"] = invalid
+    return result
+
+
+def _statements_for_analysis(policy_text: str, is_trust: bool) -> Tuple[Any, Any]:
+    """Parse + structurally validate a policy. Returns (statements, None) when
+    analyzable, or (None, error_result) for a malformed document/statement."""
     try:
         policy = json.loads(policy_text)
     except Exception as exc:
-        return {"valid": False, "parse_error": f"Invalid JSON: {exc}", "findings": [], "summary": {"risk_level": "HIGH"}}
-
+        return None, _invalid_document(f"Invalid JSON: {exc}")
     if not isinstance(policy, dict):
-        return {"valid": False, "parse_error": "Policy must be a JSON object.", "findings": [], "summary": {"risk_level": "HIGH"}}
-
+        return None, _invalid_document("Policy must be a JSON object.")
     statements = _to_list(policy.get("Statement"))
     if not statements:
-        return {"valid": False, "parse_error": "Policy contains no Statement entries.", "findings": [], "summary": {"risk_level": "HIGH"}}
+        return None, _invalid_document("Policy contains no Statement entries.")
+    invalid = _validate_statements(statements, is_trust)
+    if invalid:
+        return None, _invalid_statements_result(invalid)
+    return statements, None
+
+
+def analyze_iam_policy(policy_text: str) -> Dict[str, Any]:
+    statements, error = _statements_for_analysis(policy_text, is_trust=False)
+    if error is not None:
+        return error
 
     findings: List[Dict[str, Any]] = []
+    explicit_deny_present = False
     # Policy-level tracking so PassRole + compute provisioning split across
     # separate statements is still caught (IAM unions statements in a policy).
     policy_has_passrole = False
@@ -223,11 +390,8 @@ def analyze_iam_policy(policy_text: str) -> Dict[str, Any]:
     same_statement_injection = False
 
     for idx, raw_stmt in enumerate(statements):
-        if not isinstance(raw_stmt, dict):
-            continue
         if _is_deny(raw_stmt):
-            continue
-        if not _is_allow(raw_stmt):
+            explicit_deny_present = True
             continue
 
         actions = _normalize_actions(raw_stmt)
@@ -270,9 +434,14 @@ def analyze_iam_policy(policy_text: str) -> Dict[str, Any]:
             findings.append(_make_finding("IAM_PASSROLE", "iam:PassRole is allowed", severity, desc, idx))
 
         if _contains_any_action(actions, ASSUME_ROLE_ACTIONS):
-            severity = "HIGH" if _has_wildcard_resource(resources) else "MEDIUM"
-            desc = "This statement allows broad role assumption, which may enable lateral movement or access expansion depending on target roles."
-            findings.append(_make_finding("STS_ASSUME_ROLE", "Broad role assumption is allowed", severity, desc, idx))
+            wildcard = _has_wildcard_resource(resources)
+            severity = "HIGH" if wildcard else "MEDIUM"
+            title = "Role assumption allowed on any role" if wildcard else "Role assumption is allowed"
+            if wildcard:
+                desc = "This statement allows assuming any role (Resource \"*\"), which may enable lateral movement or access expansion depending on target roles."
+            else:
+                desc = "This statement allows assuming the named role(s); whether this enables escalation depends on the target role's permissions."
+            findings.append(_make_finding("STS_ASSUME_ROLE", title, severity, desc, idx))
 
         if _contains_any_action(actions, POLICY_MUTATION_ACTIONS):
             critical = _contains_action(actions, "iam:createpolicyversion") or _contains_action(actions, "iam:setdefaultpolicyversion")
@@ -281,10 +450,29 @@ def analyze_iam_policy(policy_text: str) -> Dict[str, Any]:
                     "to expand privileges or attach broader permissions.")
             findings.append(_make_finding("IAM_POLICY_MUTATION", "IAM policy mutation actions are allowed", severity, desc, idx))
 
-        if _contains_any_action(actions, SECRETS_ACTIONS):
+        if _contains_any_action(actions, CREDENTIAL_ESCALATION_ACTIONS):
+            wildcard = _has_wildcard_resource(resources)
+            severity = "HIGH" if wildcard else "MEDIUM"
+            desc = ("This statement allows managing another principal's credentials "
+                    "(access keys, login profile, group membership, or a role's trust). ")
+            desc += ("Scoped to Resource \"*\", it can target any user/role, including privileged ones."
+                     if wildcard else
+                     "Whether this enables escalation depends on the privilege of the target principal.")
+            findings.append(_make_finding("CREDENTIAL_ESCALATION", "Credential-access escalation is allowed", severity, desc, idx))
+
+        if _contains_any_action(actions, PERMISSIONS_BOUNDARY_ACTIONS):
+            wildcard = _has_wildcard_resource(resources)
+            severity = "HIGH" if wildcard else "MEDIUM"
+            desc = ("This statement allows setting or deleting an IAM permissions boundary, "
+                    "which caps an entity's maximum permissions; loosening or removing it can "
+                    "lift that cap and escalate privileges.")
+            findings.append(_make_finding("BOUNDARY_MUTATION", "Permissions-boundary mutation is allowed", severity, desc, idx))
+
+        bulk_read = _contains_any_action(actions, SENSITIVE_READ_ACTIONS) and _has_wildcard_resource(resources)
+        if _contains_any_action(actions, SECRETS_ACTIONS) or bulk_read:
             severity = "HIGH" if _has_wildcard_resource(resources) else "MEDIUM"
-            desc = ("This statement allows access to secrets, parameters, or decryption operations, "
-                    "which may expose sensitive data.")
+            desc = ("This statement allows reading secrets, parameters, decrypted data, or bulk "
+                    "data records, which may expose sensitive data.")
             findings.append(_make_finding("SENSITIVE_DATA_ACCESS", "Sensitive data access is allowed", severity, desc, idx))
 
         has_compute_injection = _contains_any_action(actions, COMPUTE_ROLE_INJECTION_ACTIONS)
@@ -301,10 +489,13 @@ def analyze_iam_policy(policy_text: str) -> Dict[str, Any]:
                 idx,
             ))
         elif has_compute_injection:
-            severity = "HIGH" if _has_wildcard_resource(resources) else "MEDIUM"
+            wildcard = _has_wildcard_resource(resources)
+            severity = "HIGH" if wildcard else "MEDIUM"
+            title = ("Broad compute or infrastructure provisioning allowed" if wildcard
+                     else "Compute or infrastructure provisioning is allowed")
             findings.append(_make_finding(
                 "COMPUTE_CONTROL",
-                "Broad compute or infrastructure provisioning actions are allowed",
+                title,
                 severity,
                 "This statement allows creation or reconfiguration of compute or infrastructure services, which can materially increase blast radius.",
                 idx,
@@ -371,8 +562,16 @@ def analyze_iam_policy(policy_text: str) -> Dict[str, Any]:
         ))
 
     findings = _dedupe_findings(findings)
-    risk_level = _derive_overall_risk(findings)
-    return {"valid": True, "parse_error": None, "findings": findings, "summary": {"risk_level": risk_level}}
+    findings = _consolidate_full_admin(findings)
+    return {
+        "valid": True,
+        "parse_error": None,
+        "analysis_status": "COMPLETE",
+        "findings": findings,
+        "summary": {"risk_level": _derive_overall_risk(findings)},
+        "explicit_deny_present": explicit_deny_present,
+        "effective_permissions_calculated": False,
+    }
 
 
 def _dedupe_findings(findings: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -385,6 +584,39 @@ def _dedupe_findings(findings: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         seen.add(key)
         deduped.append(finding)
     return deduped
+
+
+# Breadth findings that FULL_ADMIN already covers within the same statement —
+# `Action:"*"` + `Resource:"*"` grants all of these, so they are noise.
+_COVERED_BY_FULL_ADMIN = {
+    "BROAD_S3_DATA_ACCESS", "WILDCARD_ACTIONS_AND_RESOURCES", "WRITE_ON_ALL_RESOURCES",
+}
+
+
+def _consolidate_full_admin(findings: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """When FULL_ADMIN fires for a statement, drop the breadth findings it
+    already covers at that same statement_index and fold the affected services
+    into FULL_ADMIN's metadata. Escalation findings are kept (distinct risk)."""
+    admin_idxs = {f["statement_index"] for f in findings if f["id"] == "FULL_ADMIN"}
+    if not admin_idxs:
+        return findings
+
+    services_by_idx: Dict[int, List[str]] = {}
+    kept: List[Dict[str, Any]] = []
+    for f in findings:
+        idx = f["statement_index"]
+        if idx in admin_idxs and f["id"] != "FULL_ADMIN":
+            if f["id"].startswith("SERVICE_WILDCARD_"):
+                services_by_idx.setdefault(idx, []).append(f["id"][len("SERVICE_WILDCARD_"):].lower())
+                continue
+            if f["id"] in _COVERED_BY_FULL_ADMIN:
+                continue
+        kept.append(f)
+
+    for f in kept:
+        if f["id"] == "FULL_ADMIN" and services_by_idx.get(f["statement_index"]):
+            f["metadata"] = {"affected_services": sorted(services_by_idx[f["statement_index"]])}
+    return kept
 
 
 def _derive_overall_risk(findings: List[Dict[str, Any]]) -> str:
@@ -542,29 +774,36 @@ def _has_effective_cd_guard(statement: Dict[str, Any]) -> bool:
     return bool(set(_effective_conditions(statement)) & CONFUSED_DEPUTY_GUARD_KEYS)
 
 
+def _federation_subject_values(statement: Dict[str, Any]) -> List[str]:
+    """All condition values bound to a federation `:sub` or `:aud` context key,
+    across every operator."""
+    values: List[str] = []
+    cond = statement.get("Condition")
+    if not isinstance(cond, dict):
+        return values
+    for mapping in cond.values():
+        if not isinstance(mapping, dict):
+            continue
+        for key, raw in mapping.items():
+            k = _normalize_str(key).lower()
+            if k.endswith(":sub") or k.endswith(":aud"):
+                values.extend(_normalize_str(v) for v in _to_list(raw) if _normalize_str(v))
+    return values
+
+
 def analyze_trust_policy(policy_text: str) -> Dict[str, Any]:
     """Principal-aware analysis of a role trust policy. Evaluates who may assume
     the role and how well that trust is scoped."""
-    try:
-        policy = json.loads(policy_text)
-    except Exception as exc:
-        return {"valid": False, "parse_error": f"Invalid JSON: {exc}", "findings": [], "summary": {"risk_level": "HIGH"}}
-
-    if not isinstance(policy, dict):
-        return {"valid": False, "parse_error": "Policy must be a JSON object.", "findings": [], "summary": {"risk_level": "HIGH"}}
-
-    statements = _to_list(policy.get("Statement"))
-    if not statements:
-        return {"valid": False, "parse_error": "Policy contains no Statement entries.", "findings": [], "summary": {"risk_level": "HIGH"}}
+    statements, error = _statements_for_analysis(policy_text, is_trust=True)
+    if error is not None:
+        return error
 
     findings: List[Dict[str, Any]] = []
+    explicit_deny_present = False
 
     for idx, stmt in enumerate(statements):
-        if not isinstance(stmt, dict):
-            continue
         if _is_deny(stmt):
-            continue
-        if not _is_allow(stmt):
+            explicit_deny_present = True
             continue
 
         tier = _scope_tier(stmt)               # 'precise' | 'broad' | 'none'
@@ -623,13 +862,17 @@ def analyze_trust_policy(policy_text: str) -> Dict[str, Any]:
         )
 
         if is_web_identity:
-            has_subject_audience = any(k.endswith(":sub") or k.endswith(":aud") for k in present_keys)
-            if not has_subject_audience:
+            # Scoped only if a :sub/:aud value is present AND not a bare wildcard.
+            # A `:sub` of "*" trusts every identity from the provider — the same
+            # exposure as having no condition at all.
+            subject_values = _federation_subject_values(stmt)
+            has_effective_subject = any(v != "*" for v in subject_values)
+            if not has_effective_subject:
                 findings.append(_make_finding(
                     "TRUST_FEDERATED_UNSCOPED",
                     "Federated (OIDC) trust without subject/audience condition",
                     "HIGH",
-                    "Web-identity federation is trusted without a :sub or :aud Condition, so any identity from the provider (e.g. any repository or user) can assume the role.",
+                    "Web-identity federation is trusted without an effective :sub or :aud Condition (absent, or a bare wildcard value), so any identity from the provider (e.g. any repository or user) can assume the role.",
                     idx,
                 ))
         elif is_saml:
@@ -643,8 +886,15 @@ def analyze_trust_policy(policy_text: str) -> Dict[str, Any]:
                 ))
 
     findings = _dedupe_findings(findings)
-    risk_level = _derive_overall_risk(findings)
-    return {"valid": True, "parse_error": None, "findings": findings, "summary": {"risk_level": risk_level}}
+    return {
+        "valid": True,
+        "parse_error": None,
+        "analysis_status": "COMPLETE",
+        "findings": findings,
+        "summary": {"risk_level": _derive_overall_risk(findings)},
+        "explicit_deny_present": explicit_deny_present,
+        "effective_permissions_calculated": False,
+    }
 
 
 def _classify_policy(statements: List[Any]) -> str:
@@ -677,9 +927,9 @@ def analyze_policy_document(policy_text: str) -> Dict[str, Any]:
     try:
         policy = json.loads(policy_text)
     except Exception as exc:
-        return {"valid": False, "parse_error": f"Invalid JSON: {exc}", "findings": [], "summary": {"risk_level": "HIGH"}, "policy_type": "unknown"}
+        return {**_invalid_document(f"Invalid JSON: {exc}"), "policy_type": "unknown"}
     if not isinstance(policy, dict):
-        return {"valid": False, "parse_error": "Policy must be a JSON object.", "findings": [], "summary": {"risk_level": "HIGH"}, "policy_type": "unknown"}
+        return {**_invalid_document("Policy must be a JSON object."), "policy_type": "unknown"}
 
     statements = _to_list(policy.get("Statement"))
     policy_type = _classify_policy(statements)
@@ -691,8 +941,9 @@ def analyze_policy_document(policy_text: str) -> Dict[str, Any]:
         result = {
             "valid": True,
             "parse_error": None,
+            "analysis_status": "NOT_ANALYZED",
             "findings": [],
-            "summary": {"risk_level": "NOT_ANALYZED"},
+            "summary": {"risk_level": None},
             "note": (
                 "Resource-based policy detected (a Principal combined with "
                 "non-sts:Assume* actions — e.g. an S3 bucket, KMS key, SQS, SNS, "
@@ -712,13 +963,7 @@ class _ReadError:
 
 
 def _invalid(source: str, message: str) -> Dict[str, Any]:
-    return {
-        "source": source,
-        "valid": False,
-        "parse_error": message,
-        "findings": [],
-        "summary": {"risk_level": "HIGH"},
-    }
+    return {"source": source, **_invalid_document(message)}
 
 
 def _analyze_value(source: str, policy_value: Any) -> Dict[str, Any]:
