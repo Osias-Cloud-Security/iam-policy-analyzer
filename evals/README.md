@@ -4,7 +4,7 @@ Starter evaluation set for the `iam-policy-analyzer` skill, following the
 [agentskills.io](https://agentskills.io/skill-creation/evaluating-skills) eval
 guidance. Two independent things are tested here.
 
-## 1. Output quality — `evals.json`
+## 1. Output quality (`evals.json`)
 
 Nine test cases, each a realistic prompt plus an `expected_output` and
 objective `assertions`, covering the skill's distinct branches:
@@ -21,11 +21,11 @@ objective `assertions`, covering the skill's distinct branches:
 | 8 | `files/cfn_cross_account.yaml` | CloudFormation **YAML**: extract trust + inline policies; wildcard principal narrowed by `aws:PrincipalOrgID` → HIGH; conditions are genuine scoping |
 | 9 | `files/cfn_ci_deploy_runner.json` | CloudFormation **JSON**: benign EC2 trust → LOW; inline policy CRITICAL with multiple escalation paths; conditions (`aws:UserAgent`, tag-on-PassRole) are weak/unreliable |
 
-Run each prompt twice — once with the skill, once without — in a fresh context,
+Run each prompt twice (once with the skill, once without) in a fresh context,
 then grade the output against the case's `assertions` (PASS/FAIL with evidence).
 The expected verdicts above were confirmed against the current rule engine.
 
-## 2. Triggering — `trigger_queries.json`
+## 2. Triggering (`trigger_queries.json`)
 
 Twenty labelled prompts (ten `should_trigger`, ten `should_not_trigger`) for
 testing whether the `description` activates the skill on the right requests. The
