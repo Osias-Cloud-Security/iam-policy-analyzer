@@ -157,10 +157,6 @@ def _has_conditions(statement: Dict[str, Any]) -> bool:
     return isinstance(cond, dict) and len(cond) > 0
 
 
-def _is_allow(statement: Dict[str, Any]) -> bool:
-    return str(statement.get("Effect", "")).strip().lower() == "allow"
-
-
 def _is_deny(statement: Dict[str, Any]) -> bool:
     return str(statement.get("Effect", "")).strip().lower() == "deny"
 
@@ -351,22 +347,28 @@ def _invalid_statements_result(invalid: List[Dict[str, Any]]) -> Dict[str, Any]:
     return result
 
 
-def analyze_iam_policy(policy_text: str) -> Dict[str, Any]:
+def _statements_for_analysis(policy_text: str, is_trust: bool) -> Tuple[Any, Any]:
+    """Parse + structurally validate a policy. Returns (statements, None) when
+    analyzable, or (None, error_result) for a malformed document/statement."""
     try:
         policy = json.loads(policy_text)
     except Exception as exc:
-        return _invalid_document(f"Invalid JSON: {exc}")
-
+        return None, _invalid_document(f"Invalid JSON: {exc}")
     if not isinstance(policy, dict):
-        return _invalid_document("Policy must be a JSON object.")
-
+        return None, _invalid_document("Policy must be a JSON object.")
     statements = _to_list(policy.get("Statement"))
     if not statements:
-        return _invalid_document("Policy contains no Statement entries.")
+        return None, _invalid_document("Policy contains no Statement entries.")
+    invalid = _validate_statements(statements, is_trust)
+    if invalid:
+        return None, _invalid_statements_result(invalid)
+    return statements, None
 
-    invalid_statements = _validate_statements(statements, is_trust=False)
-    if invalid_statements:
-        return _invalid_statements_result(invalid_statements)
+
+def analyze_iam_policy(policy_text: str) -> Dict[str, Any]:
+    statements, error = _statements_for_analysis(policy_text, is_trust=False)
+    if error is not None:
+        return error
 
     findings: List[Dict[str, Any]] = []
     explicit_deny_present = False
@@ -773,21 +775,9 @@ def _federation_subject_values(statement: Dict[str, Any]) -> List[str]:
 def analyze_trust_policy(policy_text: str) -> Dict[str, Any]:
     """Principal-aware analysis of a role trust policy. Evaluates who may assume
     the role and how well that trust is scoped."""
-    try:
-        policy = json.loads(policy_text)
-    except Exception as exc:
-        return _invalid_document(f"Invalid JSON: {exc}")
-
-    if not isinstance(policy, dict):
-        return _invalid_document("Policy must be a JSON object.")
-
-    statements = _to_list(policy.get("Statement"))
-    if not statements:
-        return _invalid_document("Policy contains no Statement entries.")
-
-    invalid_statements = _validate_statements(statements, is_trust=True)
-    if invalid_statements:
-        return _invalid_statements_result(invalid_statements)
+    statements, error = _statements_for_analysis(policy_text, is_trust=True)
+    if error is not None:
+        return error
 
     findings: List[Dict[str, Any]] = []
     explicit_deny_present = False
