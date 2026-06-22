@@ -37,6 +37,14 @@ class TestComputeRoleInjection(unittest.TestCase):
         self.assertIn("COMPUTE_CONTROL", ids(result))
         self.assertIsNone(by_id(result, "COMPUTE_ROLE_INJECTION"))
 
+    def test_codebuild_plus_passrole_is_injection(self):
+        result = analyze(identity(allow(["iam:PassRole", "codebuild:CreateProject"], "*")))
+        self.assertEqual(by_id(result, "COMPUTE_ROLE_INJECTION")["severity"], "CRITICAL")
+
+    def test_emr_runjobflow_without_passrole_is_compute_control(self):
+        result = analyze(identity(allow("emr:RunJobFlow", "*")))
+        self.assertIn("COMPUTE_CONTROL", ids(result))
+
     def test_scoped_compute_control_title_not_broad(self):
         result = analyze(identity(allow("glue:CreateJob",
                                         "arn:aws:glue:us-east-1:111122223333:job/x")))
@@ -80,6 +88,23 @@ class TestCredentialEscalation(unittest.TestCase):
     def test_non_credential_action_not_flagged(self):
         result = analyze(identity(allow("iam:GetUser", "*")))
         self.assertIsNone(by_id(result, "CREDENTIAL_ESCALATION"))
+
+
+class TestBoundaryMutation(unittest.TestCase):
+    def test_delete_boundary_wildcard_is_high(self):
+        result = analyze(identity(allow("iam:DeleteRolePermissionsBoundary", "*")))
+        finding = by_id(result, "BOUNDARY_MUTATION")
+        self.assertEqual(finding["severity"], "HIGH")
+        self.assertEqual(finding["category"], "PRIVILEGE_ESCALATION")
+
+    def test_put_boundary_scoped_is_medium(self):
+        result = analyze(identity(allow("iam:PutUserPermissionsBoundary",
+                                        "arn:aws:iam::111122223333:user/app")))
+        self.assertEqual(by_id(result, "BOUNDARY_MUTATION")["severity"], "MEDIUM")
+
+    def test_non_boundary_action_not_flagged(self):
+        result = analyze(identity(allow("iam:GetRole", "*")))
+        self.assertIsNone(by_id(result, "BOUNDARY_MUTATION"))
 
 
 class TestNegative(unittest.TestCase):

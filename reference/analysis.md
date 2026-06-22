@@ -58,8 +58,8 @@ from powerful-but-scoped capabilities:
   trust).
 - **`BROAD_PERMISSION`** — wildcard breadth (`SERVICE_WILDCARD_*`, broad S3 data).
 - **`PRIVILEGE_ESCALATION`** — can be chained to higher privilege (`IAM_PASSROLE`,
-  `IAM_POLICY_MUTATION`, `CREDENTIAL_ESCALATION`, `COMPUTE_ROLE_INJECTION`,
-  unscoped trust/federation).
+  `IAM_POLICY_MUTATION`, `CREDENTIAL_ESCALATION`, `BOUNDARY_MUTATION`,
+  `COMPUTE_ROLE_INJECTION`, unscoped trust/federation).
 - **`SENSITIVE_CAPABILITY`** — a sensitive but **scoped** capability (a scoped
   `sts:AssumeRole`, secret read, or compute action). Review, not a vulnerability —
   do not describe it as a defect.
@@ -91,7 +91,8 @@ statements), not from one block.
 | `IAM_PASSROLE` | `iam:PassRole` present | CRITICAL if `Resource:"*"`, else HIGH |
 | `IAM_POLICY_MUTATION` | Any policy-mutation action (`AttachRolePolicy`, `PutRolePolicy`, `CreatePolicyVersion`, etc.) | CRITICAL if `CreatePolicyVersion`/`SetDefaultPolicyVersion`, else HIGH |
 | `CREDENTIAL_ESCALATION` | A credential-access primitive — `iam:CreateAccessKey`, `CreateLoginProfile`, `UpdateLoginProfile`, `AddUserToGroup`, `UpdateAssumeRolePolicy` (obtain another principal's credentials, no policy edit needed) | HIGH if `Resource:"*"`, else MEDIUM |
-| `COMPUTE_ROLE_INJECTION` | `iam:PassRole` **combined with** a compute-provisioning action that runs code under a passed role (`lambda:CreateFunction`, `ec2:RunInstances`, `cloudformation:CreateStack`, `ecs:RegisterTaskDefinition`, `sagemaker:Create*`, `glue:CreateJob`, …) — whether in the **same statement** or **split across separate statements** of the policy (`statement_index: -1` = cross-statement) | CRITICAL |
+| `BOUNDARY_MUTATION` | A permissions-boundary action — `iam:Put`/`Delete` `User`/`Role` `PermissionsBoundary`. A boundary caps an entity's max permissions; loosening/removing one lifts the cap | HIGH if `Resource:"*"`, else MEDIUM |
+| `COMPUTE_ROLE_INJECTION` | `iam:PassRole` **combined with** a compute-provisioning action that runs code under a passed role (`lambda:CreateFunction`, `ec2:RunInstances`, `cloudformation:CreateStack`, `ecs:RegisterTaskDefinition`, `sagemaker:Create*`, `glue:CreateJob`, `codebuild:CreateProject`, `batch:RegisterJobDefinition`, `emr:RunJobFlow`, `states:CreateStateMachine`, `datapipeline:PutPipelineDefinition`) — whether in the **same statement** or **split across separate statements** of the policy (`statement_index: -1` = cross-statement) | CRITICAL |
 | `COMPUTE_CONTROL` | A compute-provisioning action (as above) **without** PassRole in the policy | HIGH if `Resource:"*"`, else MEDIUM |
 | `SERVICE_WILDCARD_<SVC>` | `<svc>:*` for a sensitive service (`iam`, `kms`, `secretsmanager`, `ssm`, `s3`, `ec2`, `lambda`, `cloudformation`, `organizations`, `sts`) | HIGH |
 | `STS_ASSUME_ROLE` | `sts:AssumeRole` / `…WithSAML` / `…WithWebIdentity` | HIGH if `Resource:"*"`, else MEDIUM |
@@ -165,11 +166,11 @@ for it in judgment if you see one.
 - **The deterministic rules are seed signal, not the whole analysis.** They cover
   the high-confidence, well-known cases; they are deliberately *not* exhaustive.
   Apply your own judgment from AWS documentation and training to extend them — e.g.
-  the compute role-injection list names Lambda/EC2/ECS/SageMaker/CloudFormation/
-  Glue, but **any** service action that runs code under a *passed* role (Batch,
-  CodeBuild, EMR, Data Pipeline, Cloud9, Step Functions, …) is the same escalation
-  class when combined with `iam:PassRole`. Likewise weigh the `PassRole` `Resource`
-  scope: a tightly-scoped `PassRole` materially limits the escalation.
+  the compute role-injection list now covers Lambda/EC2/ECS/SageMaker/CloudFormation/
+  Glue/CodeBuild/Batch/EMR/Step Functions/Data Pipeline, but **any** other service
+  action that runs code under a *passed* role (AppRunner, Cloud9, …) is the same
+  escalation class when combined with `iam:PassRole`. Likewise weigh the `PassRole`
+  `Resource` scope: a tightly-scoped `PassRole` materially limits the escalation.
 - **`iam:CreatePolicy` is intentionally *not* treated as escalation on its own** —
   it creates an unattached policy and grants nothing until an `Attach*` action
   (already flagged) attaches it. The standalone IAM-mutation primitives are
@@ -244,7 +245,9 @@ policies, and do not produce an aggregate verdict.
    `sts:AssumeRole`, credential-access primitives (`iam:CreateAccessKey`,
    `Create`/`UpdateLoginProfile`, `AddUserToGroup`, `UpdateAssumeRolePolicy` —
    escalation only when the target can be more privileged, i.e. broad `Resource`),
-   or role-injection via a service that runs code under a passed role. Describe the
+   permissions-boundary mutation (`iam:Put`/`Delete` `User`/`Role`
+   `PermissionsBoundary` — lifts the max-permissions cap), or role-injection via a
+   service that runs code under a passed role. Describe the
    **specific capability** ("could allow attaching policies to any role"), not a
    blanket claim, and weigh `Resource` scope — a tightly-scoped PassRole or
    credential action limits the escalation. Severity MEDIUM/HIGH/CRITICAL.

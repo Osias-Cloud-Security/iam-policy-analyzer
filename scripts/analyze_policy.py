@@ -78,6 +78,13 @@ CREDENTIAL_ESCALATION_ACTIONS = {
     "iam:addusertogroup", "iam:updateassumerolepolicy",
 }
 
+# Permissions-boundary mutation. A boundary caps an entity's max permissions;
+# loosening (Put) or removing (Delete) one's own boundary lifts that cap.
+PERMISSIONS_BOUNDARY_ACTIONS = {
+    "iam:putuserpermissionsboundary", "iam:putrolepermissionsboundary",
+    "iam:deleteuserpermissionsboundary", "iam:deleterolepermissionsboundary",
+}
+
 PASSROLE_ACTION = "iam:passrole"
 
 ASSUME_ROLE_ACTIONS = {
@@ -98,9 +105,9 @@ SENSITIVE_READ_ACTIONS = {
 
 # Actions that launch/configure a compute resource which then runs code under a
 # *passed* role. Combined with iam:PassRole this is a privilege-escalation
-# primitive. This list is representative, not exhaustive — the agent should treat
-# any "create/configure a resource that runs with a passed role" action (e.g.
-# Batch, CodeBuild, EMR) as the same class via judgment.
+# primitive. Representative, not exhaustive — treat any other "create/configure a
+# resource that runs with a passed role" action the same
+# by judgment.
 COMPUTE_ROLE_INJECTION_ACTIONS = {
     "lambda:createfunction", "lambda:updatefunctionconfiguration",
     "ec2:runinstances", "cloudformation:createstack",
@@ -108,6 +115,9 @@ COMPUTE_ROLE_INJECTION_ACTIONS = {
     "ecs:registertaskdefinition",
     "sagemaker:createtrainingjob", "sagemaker:createnotebookinstance",
     "sagemaker:createprocessingjob",
+    "codebuild:createproject", "codebuild:updateproject",
+    "batch:registerjobdefinition", "emr:runjobflow",
+    "states:createstatemachine", "datapipeline:putpipelinedefinition",
 }
 
 # --- Trust-policy (Principal-aware) analysis ------------------------------
@@ -226,6 +236,7 @@ _SECURITY_RISK_IDS = {
 _BROAD_PERMISSION_IDS = {"BROAD_S3_DATA_ACCESS"}
 _PRIVILEGE_ESCALATION_IDS = {
     "IAM_PASSROLE", "IAM_POLICY_MUTATION", "COMPUTE_ROLE_INJECTION", "CREDENTIAL_ESCALATION",
+    "BOUNDARY_MUTATION",
     "TRUST_CROSS_ACCOUNT_NO_EXTERNALID", "TRUST_FEDERATED_UNSCOPED", "TRUST_SAML_UNSCOPED",
 }
 _SENSITIVE_CAPABILITY_IDS = {"SENSITIVE_DATA_ACCESS"}
@@ -448,6 +459,14 @@ def analyze_iam_policy(policy_text: str) -> Dict[str, Any]:
                      if wildcard else
                      "Whether this enables escalation depends on the privilege of the target principal.")
             findings.append(_make_finding("CREDENTIAL_ESCALATION", "Credential-access escalation is allowed", severity, desc, idx))
+
+        if _contains_any_action(actions, PERMISSIONS_BOUNDARY_ACTIONS):
+            wildcard = _has_wildcard_resource(resources)
+            severity = "HIGH" if wildcard else "MEDIUM"
+            desc = ("This statement allows setting or deleting an IAM permissions boundary, "
+                    "which caps an entity's maximum permissions; loosening or removing it can "
+                    "lift that cap and escalate privileges.")
+            findings.append(_make_finding("BOUNDARY_MUTATION", "Permissions-boundary mutation is allowed", severity, desc, idx))
 
         bulk_read = _contains_any_action(actions, SENSITIVE_READ_ACTIONS) and _has_wildcard_resource(resources)
         if _contains_any_action(actions, SECRETS_ACTIONS) or bulk_read:
