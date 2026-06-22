@@ -71,6 +71,13 @@ POLICY_MUTATION_ACTIONS = {
     "iam:putrolepolicy", "iam:putuserpolicy", "iam:putgrouppolicy",
 }
 
+# Credential-access escalation (obtain another principal's credentials, no
+# policy edit needed). Graded by Resource scope, like PassRole.
+CREDENTIAL_ESCALATION_ACTIONS = {
+    "iam:createaccesskey", "iam:createloginprofile", "iam:updateloginprofile",
+    "iam:addusertogroup", "iam:updateassumerolepolicy",
+}
+
 PASSROLE_ACTION = "iam:passrole"
 
 ASSUME_ROLE_ACTIONS = {
@@ -80,6 +87,13 @@ ASSUME_ROLE_ACTIONS = {
 SECRETS_ACTIONS = {
     "secretsmanager:getsecretvalue", "ssm:getparameter", "ssm:getparameters",
     "ssm:getparametersbypath", "kms:decrypt",
+}
+
+# Data-plane reads with a read-prefix verb that return data, not metadata.
+# Flagged only at Resource "*"; scoped reads are routine.
+SENSITIVE_READ_ACTIONS = {
+    "dynamodb:getitem", "dynamodb:batchgetitem", "dynamodb:query", "dynamodb:scan",
+    "lambda:getfunction",
 }
 
 # Actions that launch/configure a compute resource which then runs code under a
@@ -215,7 +229,7 @@ _SECURITY_RISK_IDS = {
 }
 _BROAD_PERMISSION_IDS = {"BROAD_S3_DATA_ACCESS"}
 _PRIVILEGE_ESCALATION_IDS = {
-    "IAM_PASSROLE", "IAM_POLICY_MUTATION", "COMPUTE_ROLE_INJECTION",
+    "IAM_PASSROLE", "IAM_POLICY_MUTATION", "COMPUTE_ROLE_INJECTION", "CREDENTIAL_ESCALATION",
     "TRUST_CROSS_ACCOUNT_NO_EXTERNALID", "TRUST_FEDERATED_UNSCOPED", "TRUST_SAML_UNSCOPED",
 }
 _SENSITIVE_CAPABILITY_IDS = {"SENSITIVE_DATA_ACCESS"}
@@ -423,10 +437,21 @@ def analyze_iam_policy(policy_text: str) -> Dict[str, Any]:
                     "to expand privileges or attach broader permissions.")
             findings.append(_make_finding("IAM_POLICY_MUTATION", "IAM policy mutation actions are allowed", severity, desc, idx))
 
-        if _contains_any_action(actions, SECRETS_ACTIONS):
+        if _contains_any_action(actions, CREDENTIAL_ESCALATION_ACTIONS):
+            wildcard = _has_wildcard_resource(resources)
+            severity = "HIGH" if wildcard else "MEDIUM"
+            desc = ("This statement allows managing another principal's credentials "
+                    "(access keys, login profile, group membership, or a role's trust). ")
+            desc += ("Scoped to Resource \"*\", it can target any user/role, including privileged ones."
+                     if wildcard else
+                     "Whether this enables escalation depends on the privilege of the target principal.")
+            findings.append(_make_finding("CREDENTIAL_ESCALATION", "Credential-access escalation is allowed", severity, desc, idx))
+
+        bulk_read = _contains_any_action(actions, SENSITIVE_READ_ACTIONS) and _has_wildcard_resource(resources)
+        if _contains_any_action(actions, SECRETS_ACTIONS) or bulk_read:
             severity = "HIGH" if _has_wildcard_resource(resources) else "MEDIUM"
-            desc = ("This statement allows access to secrets, parameters, or decryption operations, "
-                    "which may expose sensitive data.")
+            desc = ("This statement allows reading secrets, parameters, decrypted data, or bulk "
+                    "data records, which may expose sensitive data.")
             findings.append(_make_finding("SENSITIVE_DATA_ACCESS", "Sensitive data access is allowed", severity, desc, idx))
 
         has_compute_injection = _contains_any_action(actions, COMPUTE_ROLE_INJECTION_ACTIONS)

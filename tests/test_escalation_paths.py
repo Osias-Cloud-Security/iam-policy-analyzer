@@ -61,6 +61,27 @@ class TestPolicyMutation(unittest.TestCase):
         self.assertEqual(by_id(result, "IAM_POLICY_MUTATION")["category"], "PRIVILEGE_ESCALATION")
 
 
+class TestCredentialEscalation(unittest.TestCase):
+    def test_create_access_key_wildcard_is_high(self):
+        result = analyze(identity(allow("iam:CreateAccessKey", "*")))
+        finding = by_id(result, "CREDENTIAL_ESCALATION")
+        self.assertEqual(finding["severity"], "HIGH")
+        self.assertEqual(finding["category"], "PRIVILEGE_ESCALATION")
+
+    def test_update_assume_role_policy_scoped_is_medium(self):
+        result = analyze(identity(allow("iam:UpdateAssumeRolePolicy",
+                                        "arn:aws:iam::111122223333:role/app")))
+        self.assertEqual(by_id(result, "CREDENTIAL_ESCALATION")["severity"], "MEDIUM")
+
+    def test_add_user_to_group_flagged(self):
+        result = analyze(identity(allow("iam:AddUserToGroup", "*")))
+        self.assertIn("CREDENTIAL_ESCALATION", ids(result))
+
+    def test_non_credential_action_not_flagged(self):
+        result = analyze(identity(allow("iam:GetUser", "*")))
+        self.assertIsNone(by_id(result, "CREDENTIAL_ESCALATION"))
+
+
 class TestNegative(unittest.TestCase):
     def test_passrole_alone_no_injection(self):
         result = analyze(identity(allow("iam:PassRole", "arn:aws:iam::111122223333:role/app")))

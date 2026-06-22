@@ -44,13 +44,16 @@ policies, and do not produce an aggregate verdict.
    to gain higher privileges than intended? Include **only** when permissions
    clearly enable it: `iam:PassRole`, `iam:CreatePolicyVersion`/
    `SetDefaultPolicyVersion`, `iam:AttachRolePolicy`/`PutRolePolicy`, broad
-   `sts:AssumeRole`, or role-injection via a service that runs code under a passed
-   role (Lambda/EC2/ECS/SageMaker/CloudFormation/Glue — and by judgment Batch,
-   CodeBuild, EMR, etc.). The engine flags `PassRole` + compute provisioning even
-   across **separate statements**. Describe the **specific capability** ("could
-   allow attaching policies to any role"), not a blanket claim, and weigh the
-   `PassRole` `Resource` scope — a tightly-scoped PassRole limits the escalation.
-   Severity MEDIUM/HIGH/CRITICAL.
+   `sts:AssumeRole`, credential-access primitives (`iam:CreateAccessKey`,
+   `Create`/`UpdateLoginProfile`, `AddUserToGroup`, `UpdateAssumeRolePolicy` —
+   obtaining another principal's credentials, escalation only when the target can
+   be more privileged, i.e. broad `Resource`), or role-injection via a service
+   that runs code under a passed role (Lambda/EC2/ECS/SageMaker/CloudFormation/Glue
+   — and by judgment Batch, CodeBuild, EMR, etc.). The engine flags `PassRole` +
+   compute provisioning even across **separate statements**. Describe the
+   **specific capability** ("could allow attaching policies to any role"), not a
+   blanket claim, and weigh `Resource` scope — a tightly-scoped PassRole or
+   credential action limits the escalation. Severity MEDIUM/HIGH/CRITICAL.
 
 3. **Blast radius risks** — *impact only.* If these credentials were stolen, what
    is the realistic damage to data, services, or account integrity? Describe
@@ -101,8 +104,11 @@ action or normal service principals.
 
 ## Exclusions
 
-- Do not flag standard read-only `describe`/`list`/`get`/`lookup`/`view`
-  permissions unless combined with write, delete, or mutation actions.
+- Do not flag standard **metadata/control-plane** reads
+  (`describe`/`list`/`get`/`lookup`/`view`) unless combined with write, delete, or
+  mutation actions. But a `Get`/`Query`/`Scan` that reads **data contents** at
+  scale (e.g. `dynamodb:Scan`, `s3:GetObject`, secret reads on `Resource:"*"`) is
+  a real exposure — judge by what is read, not the verb prefix.
 - Do not surface findings about the **absence** of permissions — only flag what
   the policy explicitly allows that is dangerous.
 

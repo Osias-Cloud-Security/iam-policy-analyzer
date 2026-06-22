@@ -82,6 +82,29 @@ class TestAssumeRoleTitle(unittest.TestCase):
         self.assertEqual(finding["category"], "PRIVILEGE_ESCALATION")
 
 
+class TestSensitiveDataPlaneReads(unittest.TestCase):
+    def test_dynamodb_getitem_on_star_flagged(self):
+        result = analyze(identity(allow("dynamodb:GetItem", "*")))
+        self.assertEqual(by_id(result, "SENSITIVE_DATA_ACCESS")["severity"], "HIGH")
+
+    def test_dynamodb_scan_on_star_flagged(self):
+        result = analyze(identity(allow("dynamodb:Scan", "*")))
+        self.assertIsNotNone(by_id(result, "SENSITIVE_DATA_ACCESS"))
+
+    def test_lambda_getfunction_on_star_flagged(self):
+        result = analyze(identity(allow("lambda:GetFunction", "*")))
+        self.assertIsNotNone(by_id(result, "SENSITIVE_DATA_ACCESS"))
+
+    def test_scoped_dynamodb_getitem_is_clean(self):
+        result = analyze(identity(allow("dynamodb:GetItem",
+                                        "arn:aws:dynamodb:us-east-1:111122223333:table/Orders")))
+        self.assertEqual(result["findings"], [])
+
+    def test_metadata_read_on_star_stays_clean(self):
+        result = analyze(identity(allow("ec2:DescribeInstances", "*")))
+        self.assertEqual(risk(result), "LOW")
+
+
 class TestWriteAndWildcards(unittest.TestCase):
     def test_write_on_all_resources(self):
         result = analyze(identity(allow("ec2:TerminateInstances", "*")))

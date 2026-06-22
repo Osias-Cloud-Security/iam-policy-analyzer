@@ -111,7 +111,10 @@ paste the rendered policy JSON. Never guess the missing field.
 are concrete, so the **core analysis still holds**: the action namespace alone
 tells you the targeted service and capability (`iam:PutRolePolicy` → manages IAM
 principals; `s3:GetObject` → S3 data). Extract the statement with its real
-actions, do **not** invent a `Resource` or assume `"*"`, and note in Analysis
+actions, do **not** invent a `Resource` or assume `"*"` — keep the unresolved
+reference as its literal string (e.g. leave `Resource: "${var.bucket}"` in place)
+so the statement stays well-formed; do not drop the `Resource` key (a statement
+with no `Resource`/`NotResource` is rejected as malformed). Note in Analysis
 Limitations that the resource scope was unresolved — *breadth/severity* is
 uncertain but the capabilities stand. Don't drop it.
 

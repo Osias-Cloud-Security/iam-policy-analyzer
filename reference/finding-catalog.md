@@ -82,11 +82,12 @@ statements), not from one block.
 | `WILDCARD_ACTIONS_AND_RESOURCES` | Any wildcard action (`*` inside the action) + `Resource:"*"`, and not all actions are read-only | CRITICAL |
 | `IAM_PASSROLE` | `iam:PassRole` present | CRITICAL if `Resource:"*"`, else HIGH |
 | `IAM_POLICY_MUTATION` | Any policy-mutation action (`AttachRolePolicy`, `PutRolePolicy`, `CreatePolicyVersion`, etc.) | CRITICAL if `CreatePolicyVersion`/`SetDefaultPolicyVersion`, else HIGH |
+| `CREDENTIAL_ESCALATION` | A credential-access primitive — `iam:CreateAccessKey`, `CreateLoginProfile`, `UpdateLoginProfile`, `AddUserToGroup`, `UpdateAssumeRolePolicy` (obtain another principal's credentials, no policy edit needed) | HIGH if `Resource:"*"`, else MEDIUM |
 | `COMPUTE_ROLE_INJECTION` | `iam:PassRole` **combined with** a compute-provisioning action that runs code under a passed role (`lambda:CreateFunction`, `ec2:RunInstances`, `cloudformation:CreateStack`, `ecs:RegisterTaskDefinition`, `sagemaker:Create*`, `glue:CreateJob`, …) — whether in the **same statement** or **split across separate statements** of the policy (`statement_index: -1` = cross-statement) | CRITICAL |
 | `COMPUTE_CONTROL` | A compute-provisioning action (as above) **without** PassRole in the policy | HIGH if `Resource:"*"`, else MEDIUM |
 | `SERVICE_WILDCARD_<SVC>` | `<svc>:*` for a sensitive service (`iam`, `kms`, `secretsmanager`, `ssm`, `s3`, `ec2`, `lambda`, `cloudformation`, `organizations`, `sts`) | HIGH |
 | `STS_ASSUME_ROLE` | `sts:AssumeRole` / `…WithSAML` / `…WithWebIdentity` | HIGH if `Resource:"*"`, else MEDIUM |
-| `SENSITIVE_DATA_ACCESS` | Secret/parameter/decrypt reads (`secretsmanager:GetSecretValue`, `ssm:GetParameter(s)`, `kms:Decrypt`) | HIGH if `Resource:"*"`, else MEDIUM |
+| `SENSITIVE_DATA_ACCESS` | Secret/parameter/decrypt reads (`secretsmanager:GetSecretValue`, `ssm:GetParameter(s)`, `kms:Decrypt`) at any scope; **or** a bulk data-plane read (`dynamodb:GetItem`/`Query`/`Scan`/`BatchGetItem`, `lambda:GetFunction`) **only at `Resource:"*"`** | HIGH if `Resource:"*"`, else MEDIUM |
 | `BROAD_S3_DATA_ACCESS` | An S3 object data action (`s3:GetObject`/`PutObject`/`DeleteObject`) **or** a grant of the S3 service wildcard (`s3:*` or `*`), with `Resource:"*"`. Read-only S3 actions (e.g. `s3:ListAllMyBuckets`) do **not** trigger this on their own. | HIGH |
 | `WRITE_ON_ALL_RESOURCES` | Any non-read-only action with `Resource:"*"` | HIGH |
 | `ALLOW_NOTACTION` | An `Allow` statement uses `NotAction` | HIGH |
@@ -169,8 +170,17 @@ for it in judgment if you see one.
   (already flagged) attaches it. The standalone IAM-mutation primitives are
   `iam:CreatePolicyVersion` / `SetDefaultPolicyVersion` (they change an
   already-attached policy).
-- "Read-only" = the action verb starts with `describe`, `get`, `list`, `lookup`,
-  or `view`. `*` is treated as non-read-only.
+- "Read-only" (for the write-on-`*` gate) = the action verb starts with
+  `describe`, `get`, `list`, `lookup`, or `view`; `*` is non-read-only. This
+  prefix test is about **control-plane/metadata** reads. **Data-plane reads**
+  (reading object/item/secret *contents*) are NOT safe just because the verb is
+  `Get`/`Query`/`Scan` — the engine floors the common ones via
+  `SENSITIVE_DATA_ACCESS` (at `Resource:"*"`), but judge others (e.g.
+  `s3:GetObject*` outside the S3 rule, service data reads) by their effect, not
+  their prefix.
+- **Escalation coverage is not exhaustive.** `CREDENTIAL_ESCALATION` covers the
+  five well-known IAM credential primitives only; ARN-embedded wildcards (e.g.
+  `Resource: ".../user/*"`) read as scoped here — treat them as broad by judgment.
 - For identity policies, the engine does not inspect `Condition` *values* beyond
   noting presence; for trust policies it specifically checks for the scoping and
   confused-deputy condition keys above. When a statement has conditions, temper
