@@ -84,6 +84,32 @@
         "The report includes at least one prioritized recommendation to scope the actions (e.g. specific s3:GetObject) and/or the resource to specific buckets/prefixes",
         "The report does not dismiss the policy as low risk on the grounds that it is read-only"
       ]
+    },
+    {
+      "id": 8,
+      "prompt": "Review the IAM policies in evals/files/cfn_cross_account.yaml for least-privilege and escalation risks.",
+      "expected_output": "The skill extracts both policies from the CloudFormation YAML and scores them independently: the trust policy (Principal \"*\" narrowed by aws:PrincipalOrgID) as HIGH — a wildcard principal rescued by a single condition, not CRITICAL because it is org-scoped and not LOW because the wildcard is fragile — and the inline policy as CRITICAL (unrestricted iam:PassRole), while recognizing that its conditions (aws:SourceVpce, MFA, aws:SourceIp, iam:PassedToService) are genuine scoping controls.",
+      "files": ["evals/files/cfn_cross_account.yaml"],
+      "assertions": [
+        "Both policy documents are extracted from the CloudFormation template (the role's AssumeRolePolicyDocument and the inline cross-account-integration-policy) and assessed independently",
+        "The trust policy is rated HIGH and the report explains the wildcard principal is narrowed to an organization by aws:PrincipalOrgID (neither treated as fully open/CRITICAL nor as clean/LOW)",
+        "The inline policy is rated CRITICAL and the report flags the unrestricted iam:PassRole (Resource \"*\")",
+        "The report acknowledges that the statement Conditions (aws:SourceVpce, aws:MultiFactorAuthPresent, aws:SourceIp, iam:PassedToService) meaningfully scope access rather than ignoring them",
+        "Each policy gets its own assessment block — the report does not merge them into one combined verdict"
+      ]
+    },
+    {
+      "id": 9,
+      "prompt": "Analyze the IAM policies in evals/files/cfn_ci_deploy_runner.json — is this CI deploy role over-permissioned or escalatable?",
+      "expected_output": "The skill extracts both policies from the CloudFormation JSON: the trust policy (ec2.amazonaws.com service principal) is benign/LOW, and the inline policy is CRITICAL with multiple distinct privilege-escalation paths — IAM policy mutation (CreatePolicyVersion/SetDefaultPolicyVersion, AttachRolePolicy/AttachUserPolicy), credential-access escalation (iam:CreateAccessKey), and iam:PassRole combined with lambda:CreateFunction. The report should recognize that the conditions (aws:UserAgent, aws:ResourceTag/env on PassRole, aws:RequestedRegion) are weak or unreliable controls, not genuine mitigations.",
+      "files": ["evals/files/cfn_ci_deploy_runner.json"],
+      "assertions": [
+        "Both policy documents are extracted; the trust policy (ec2.amazonaws.com service principal) is treated as benign and not given a high/critical rating",
+        "The inline policy is rated CRITICAL",
+        "The report identifies more than one escalation path among: IAM policy mutation (CreatePolicyVersion/SetDefaultPolicyVersion or Attach*Policy), credential creation (iam:CreateAccessKey), and iam:PassRole with lambda:CreateFunction",
+        "The report notes that at least one of the Conditions is not a real control (e.g. aws:UserAgent is spoofable, or tag-based control of iam:PassRole is unreliable) rather than treating the conditions as adequate scoping",
+        "The two policies are reported as independent assessments, not a single combined verdict"
+      ]
     }
   ]
 }
