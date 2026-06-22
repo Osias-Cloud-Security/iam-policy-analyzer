@@ -31,3 +31,4 @@ python3 -m pytest tests                       # if pytest is installed
 | `test_deduplication.py` | `FULL_ADMIN` consolidation (exact-output regression) |
 | `test_manifest_input.py` | Single / array / manifest input shapes |
 | `test_exit_codes.py` | Process exit codes (malformed policy = result, not failure) |
+| `test_catalog_consistency.py` | Every emitted finding id is documented in `analysis.md` (code↔docs drift guard) |
