@@ -52,7 +52,7 @@ from typing import Any, Dict, List, Set, Tuple
 
 # Process exit codes. Note: a per-policy `valid: false` (malformed JSON content,
 # no Statement, etc.) is a legitimate analysis RESULT carried in the output JSON,
-# NOT a script failure — so it does not change the exit code. Non-zero is reserved
+# NOT a script failure, so it does not change the exit code. Non-zero is reserved
 # for the script being unable to do its job at all.
 EXIT_OK = 0          # analysis completed for every input; results emitted
 EXIT_NO_INPUT = 1    # nothing to analyze (empty stdin / no policy provided)
@@ -105,7 +105,7 @@ SENSITIVE_READ_ACTIONS = {
 
 # Actions that launch/configure a compute resource which then runs code under a
 # *passed* role. Combined with iam:PassRole this is a privilege-escalation
-# primitive. Representative, not exhaustive — treat any other "create/configure a
+# primitive. Representative, not exhaustive; treat any other "create/configure a
 # resource that runs with a passed role" action the same
 # by judgment.
 COMPUTE_ROLE_INJECTION_ACTIONS = {
@@ -122,7 +122,7 @@ COMPUTE_ROLE_INJECTION_ACTIONS = {
 
 # --- Trust-policy (Principal-aware) analysis ------------------------------
 # A trust policy answers "who may assume this role". The risk lives in the
-# Principal element and the Condition scoping it — not in Action/Resource
+# Principal element and the Condition scoping it, not in Action/Resource
 # (the Action is almost always sts:AssumeRole-family and is expected).
 # Condition-key sets below are drawn from the AWS global condition context
 # keys reference and the confused-deputy guidance.
@@ -222,7 +222,7 @@ def _statement_scope_note(statement: Dict[str, Any]) -> str:
     return "; ".join(parts)
 
 
-# Finding category — separates genuine defects from powerful-but-scoped
+# Finding category: separates genuine defects from powerful-but-scoped
 # capabilities so a tightly-scoped grant is not mislabeled a vulnerability.
 #   SECURITY_RISK        — a broad/unsafe grant that is a defect on its own
 #   BROAD_PERMISSION     — wildcard breadth (service-wide / bulk data)
@@ -273,7 +273,7 @@ def _make_finding(finding_id: str, title: str, severity: str, description: str, 
 
 
 # Statement validation (P1). A statement the engine cannot reason about must be
-# surfaced, never silently skipped — otherwise a malformed policy reads as a
+# surfaced, never silently skipped; otherwise a malformed policy reads as a
 # clean LOW. `_DENY` marks a Deny statement: understood and intentionally not
 # acted on (not a defect, not a skip).
 _DENY = object()
@@ -502,7 +502,7 @@ def analyze_iam_policy(policy_text: str) -> Dict[str, Any]:
             ))
 
         # Broad S3 data access: the statement grants an S3 object read/write/delete
-        # action — named exactly (s3:GetObject) OR via a wildcard that covers it
+        # action, named exactly (s3:GetObject) OR via a wildcard that covers it
         # (s3:Get*, s3:*, *). Coverage is tested with _action_matches(target, action)
         # = fnmatch(target, action): the POLICY action is the glob (pattern) and the
         # concrete object action is the candidate it may grant. Matching the other
@@ -586,7 +586,7 @@ def _dedupe_findings(findings: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return deduped
 
 
-# Breadth findings that FULL_ADMIN already covers within the same statement —
+# Breadth findings that FULL_ADMIN already covers within the same statement:
 # `Action:"*"` + `Resource:"*"` grants all of these, so they are noise.
 _COVERED_BY_FULL_ADMIN = {
     "BROAD_S3_DATA_ACCESS", "WILDCARD_ACTIONS_AND_RESOURCES", "WRITE_ON_ALL_RESOURCES",
@@ -677,7 +677,7 @@ def _is_account_principal(value: str) -> bool:
     return bool(_ACCOUNT_ROOT_RE.match(value) or _BARE_ACCOUNT_RE.match(value))
 
 
-# Two INDEPENDENT axes over trust-policy Condition keys — they overlap in
+# Two INDEPENDENT axes over trust-policy Condition keys; they overlap in
 # membership on purpose, because they answer different questions:
 #
 #   1. SCOPING TIER (PRECISE vs BROAD) — how tightly the condition narrows WHO
@@ -759,7 +759,7 @@ def _scope_tier(statement: Dict[str, Any]) -> str:
     precise = bool(keys & (PRECISE_SCOPING_KEYS - {"aws:principalarn"}))
     if "aws:principalarn" in keys:
         # An exact PrincipalArn is only "precise" if it names a specific
-        # principal — a `…:root` / account value is account-level, i.e. broad.
+        # principal; a `…:root` / account value is account-level, i.e. broad.
         if any(not _is_account_principal(v) for v in effective["aws:principalarn"]):
             precise = True
     if precise:
@@ -814,8 +814,8 @@ def analyze_trust_policy(policy_text: str) -> Dict[str, Any]:
         federated = _principal_field(stmt, "Federated")
 
         if "NotPrincipal" in stmt:
-            # "Allow + NotPrincipal" trusts everyone EXCEPT the listed principals
-            # — semantically a near-wildcard, which AWS recommends never using.
+            # "Allow + NotPrincipal" trusts everyone EXCEPT the listed principals,
+            # semantically a near-wildcard, which AWS recommends never using.
             severity = "HIGH" if tier != "none" else "CRITICAL"
             findings.append(_make_finding(
                 "TRUST_NOTPRINCIPAL",
@@ -863,7 +863,7 @@ def analyze_trust_policy(policy_text: str) -> Dict[str, Any]:
 
         if is_web_identity:
             # Scoped only if a :sub/:aud value is present AND not a bare wildcard.
-            # A `:sub` of "*" trusts every identity from the provider — the same
+            # A `:sub` of "*" trusts every identity from the provider, the same
             # exposure as having no condition at all.
             subject_values = _federation_subject_values(stmt)
             has_effective_subject = any(v != "*" for v in subject_values)
@@ -1066,8 +1066,8 @@ def main() -> int:
 
     print(json.dumps({"policies": results}, indent=2))
     # A malformed policy is a legitimate result (carried in the JSON), so it does
-    # NOT fail the run. Only an unreadable input file — the script being unable to
-    # do its job — yields a non-zero exit.
+    # NOT fail the run. Only an unreadable input file (the script being unable to
+    # do its job) yields a non-zero exit.
     return EXIT_READ_ERROR if had_read_error else EXIT_OK
 
 
