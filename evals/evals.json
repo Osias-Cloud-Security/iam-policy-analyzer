@@ -1,0 +1,115 @@
+{
+  "skill_name": "iam-policy-analyzer",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Is the IAM policy in evals/files/full_admin.json safe to attach to a role? Tell me how bad it is.",
+      "expected_output": "A per-policy report identifying full administrative access (Action \"*\" on Resource \"*\") with an overall risk of CRITICAL, and a recommendation to scope actions and resources down to what the role needs.",
+      "files": ["evals/files/full_admin.json"],
+      "assertions": [
+        "The report gives this policy an overall risk level of CRITICAL",
+        "The report explicitly calls out that the policy grants full/unrestricted administrative access (Action \"*\" and Resource \"*\")",
+        "The report includes at least one prioritized recommendation to narrow the actions and/or resources",
+        "The report names the context it could not see (e.g. attachments, SCPs, permission boundaries) as a limitation"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "Can someone with the policy in evals/files/passrole_escalation.json escalate their privileges? Walk me through it.",
+      "expected_output": "A report flagging the combination of iam:PassRole with a compute-provisioning action (lambda:CreateFunction) as a privilege-escalation path, overall risk CRITICAL, phrased as an enabling condition rather than a definitive compromise.",
+      "files": ["evals/files/passrole_escalation.json"],
+      "assertions": [
+        "The report gives this policy an overall risk level of CRITICAL",
+        "The report describes a privilege-escalation path that links iam:PassRole to launching/configuring compute (e.g. lambda:CreateFunction)",
+        "The escalation is phrased as something the policy 'can enable' or 'may allow' rather than a guaranteed/definitive compromise",
+        "The report does not claim to know which role would be passed (it cannot see role inventory)"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "Review evals/files/readonly_audit.json — this is for a read-only audit role. Anything wrong with it?",
+      "expected_output": "A report with overall risk LOW and no security findings, recognizing that describe/get/list/lookup actions are expected for an audit role and should not be flagged.",
+      "files": ["evals/files/readonly_audit.json"],
+      "assertions": [
+        "The report gives this policy an overall risk level of LOW",
+        "The report does not raise any high or critical security findings",
+        "The report does not flag the routine read-only describe/get/list/lookup actions as risks",
+        "The report does not invent findings about permissions that are merely absent"
+      ]
+    },
+    {
+      "id": 4,
+      "prompt": "Here's a role trust policy in evals/files/wildcard_trust.json. Who can assume this role?",
+      "expected_output": "A report identifying that a wildcard principal (\"Principal\": \"*\") with no scoping Condition lets any AWS principal in any account assume the role, overall risk CRITICAL, with a recommendation to name a specific principal or add a scoping condition.",
+      "files": ["evals/files/wildcard_trust.json"],
+      "assertions": [
+        "The report identifies this as a role trust policy",
+        "The report gives it an overall risk level of CRITICAL",
+        "The report explains that a wildcard principal with no effective Condition lets any AWS principal (any account) assume the role",
+        "The report recommends naming a specific principal or adding a scoping condition",
+        "The report does not flag sts:AssumeRole itself as the problem (the risk is the unscoped Principal)"
+      ]
+    },
+    {
+      "id": 5,
+      "prompt": "Check the policy in evals/files/s3_bucket_policy.json for least-privilege problems.",
+      "expected_output": "The skill recognizes this is a resource-based (S3 bucket) policy, reports it as not analyzed / out of scope rather than scoring it, and explains why.",
+      "files": ["evals/files/s3_bucket_policy.json"],
+      "assertions": [
+        "The report states this is a resource-based policy that is out of scope / not analyzed",
+        "The report does not assign a LOW/MEDIUM/HIGH/CRITICAL risk score to it",
+        "The report does not fabricate identity-policy findings for it"
+      ]
+    },
+    {
+      "id": 6,
+      "prompt": "Analyze the IAM policies in evals/files/roles.tf for least-privilege and escalation risks.",
+      "expected_output": "The skill extracts both policies from the Terraform file and scores them independently: the deploy policy (s3:* on Resource \"*\") as HIGH or CRITICAL, and the ci role's trust policy (ec2.amazonaws.com service principal assuming the role) as LOW/benign. The two are reported as separate assessments, not a single combined verdict.",
+      "files": ["evals/files/roles.tf"],
+      "assertions": [
+        "Both policies defined in the .tf file are extracted and assessed (the aws_iam_policy.deploy policy and the aws_iam_role.ci trust policy)",
+        "The deploy policy (s3:* on Resource \"*\") is rated HIGH or CRITICAL and its broad S3 wildcard is called out",
+        "The ci role trust policy (ec2.amazonaws.com service principal) is treated as expected/benign and not given a high/critical rating",
+        "Each policy gets its own independent assessment block — the report does not merge them into one combined risk verdict"
+      ]
+    },
+    {
+      "id": 7,
+      "prompt": "Is the policy in evals/files/s3_read_glob.json over-permissioned? It only grants read access to S3.",
+      "expected_output": "A report identifying that s3:Get* on Resource \"*\" grants bulk read access to every S3 object in the account (a wildcard action that covers s3:GetObject), rated HIGH, with a recommendation to scope to specific object actions and bucket/prefix resources. Read-only framing does not make account-wide object reads safe.",
+      "files": ["evals/files/s3_read_glob.json"],
+      "assertions": [
+        "The report gives this policy an overall risk level of HIGH (it is not treated as harmless just because the actions are reads)",
+        "The report calls out that s3:Get* on Resource \"*\" allows reading the contents of every S3 object in the account (broad/bulk S3 object data access)",
+        "The report includes at least one prioritized recommendation to scope the actions (e.g. specific s3:GetObject) and/or the resource to specific buckets/prefixes",
+        "The report does not dismiss the policy as low risk on the grounds that it is read-only"
+      ]
+    },
+    {
+      "id": 8,
+      "prompt": "Review the IAM policies in evals/files/cfn_cross_account.yaml for least-privilege and escalation risks.",
+      "expected_output": "The skill extracts both policies from the CloudFormation YAML and scores them independently: the trust policy (Principal \"*\" narrowed by aws:PrincipalOrgID) as HIGH — a wildcard principal rescued by a single condition, not CRITICAL because it is org-scoped and not LOW because the wildcard is fragile — and the inline policy as CRITICAL (unrestricted iam:PassRole), while recognizing that its conditions (aws:SourceVpce, MFA, aws:SourceIp, iam:PassedToService) are genuine scoping controls.",
+      "files": ["evals/files/cfn_cross_account.yaml"],
+      "assertions": [
+        "Both policy documents are extracted from the CloudFormation template (the role's AssumeRolePolicyDocument and the inline cross-account-integration-policy) and assessed independently",
+        "The trust policy is rated HIGH and the report explains the wildcard principal is narrowed to an organization by aws:PrincipalOrgID (neither treated as fully open/CRITICAL nor as clean/LOW)",
+        "The inline policy is rated CRITICAL and the report flags the unrestricted iam:PassRole (Resource \"*\")",
+        "The report acknowledges that the statement Conditions (aws:SourceVpce, aws:MultiFactorAuthPresent, aws:SourceIp, iam:PassedToService) meaningfully scope access rather than ignoring them",
+        "Each policy gets its own assessment block — the report does not merge them into one combined verdict"
+      ]
+    },
+    {
+      "id": 9,
+      "prompt": "Analyze the IAM policies in evals/files/cfn_ci_deploy_runner.json — is this CI deploy role over-permissioned or escalatable?",
+      "expected_output": "The skill extracts both policies from the CloudFormation JSON: the trust policy (ec2.amazonaws.com service principal) is benign/LOW, and the inline policy is CRITICAL with multiple distinct privilege-escalation paths — IAM policy mutation (CreatePolicyVersion/SetDefaultPolicyVersion, AttachRolePolicy/AttachUserPolicy), credential-access escalation (iam:CreateAccessKey), and iam:PassRole combined with lambda:CreateFunction. The report should recognize that the conditions (aws:UserAgent, aws:ResourceTag/env on PassRole, aws:RequestedRegion) are weak or unreliable controls, not genuine mitigations.",
+      "files": ["evals/files/cfn_ci_deploy_runner.json"],
+      "assertions": [
+        "Both policy documents are extracted; the trust policy (ec2.amazonaws.com service principal) is treated as benign and not given a high/critical rating",
+        "The inline policy is rated CRITICAL",
+        "The report identifies more than one escalation path among: IAM policy mutation (CreatePolicyVersion/SetDefaultPolicyVersion or Attach*Policy), credential creation (iam:CreateAccessKey), and iam:PassRole with lambda:CreateFunction",
+        "The report notes that at least one of the Conditions is not a real control (e.g. aws:UserAgent is spoofable, or tag-based control of iam:PassRole is unreliable) rather than treating the conditions as adequate scoping",
+        "The two policies are reported as independent assessments, not a single combined verdict"
+      ]
+    }
+  ]
+}
