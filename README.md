@@ -4,7 +4,7 @@
 
 A Claude [Agent Skill](https://docs.claude.com/en/docs/agents-and-tools/agent-skills/overview) that analyzes one or more AWS IAM policies and produces a plain-language security assessment per policy — least privilege violations, privilege escalation paths, and blast radius, with prioritized recommendations.
 
-It pairs a **deterministic rule engine** (the factual ground truth) with **model-driven write-up guidance** (clear, cautious, non-speculative phrasing). Everything is based solely on the policy text — it never assumes attachment context, SCPs, permission boundaries, or runtime usage.
+It pairs a **deterministic rule engine** (the deterministic findings layer) with **model-driven write-up guidance** (clear, cautious, non-speculative phrasing). Everything is based solely on the policy text — it never assumes attachment context, SCPs, permission boundaries, or runtime usage.
 
 > **Claude Code only** — this is a skill for [Claude Code](https://docs.anthropic.com/en/docs/claude-code) and the Claude apps. It is not a standalone tool, and it is not compatible with Cursor, Copilot, Windsurf, or other AI coding tools.
 
@@ -18,7 +18,7 @@ Reviewing policies by hand is slow, inconsistent, and easy to get wrong. Most li
 
 ## The Solution
 
-Point the skill at whatever you have — pasted JSON, Terraform, CloudFormation — and it extracts every policy document and scores each one independently. A deterministic engine supplies the factual findings; Claude turns them into a careful, prioritized report.
+Point the skill at whatever you have — pasted JSON, Terraform, CloudFormation — and it extracts every policy document and scores each one independently. A deterministic engine supplies reproducible findings for the supported high-risk patterns; Claude turns them into a careful, prioritized report.
 
 ```
 iam-policy-analyzer/
@@ -76,7 +76,7 @@ cd ~/.claude/skills/iam-policy-analyzer && git pull
 
 The skill follows three principles:
 
-**Deterministic first.** A Python rule engine (stdlib only, no dependencies) is the factual ground truth — it classifies each document as an identity or trust policy and flags the known-dangerous patterns. Claude never invents findings the policy text doesn't support.
+**Deterministic first.** A Python rule engine (stdlib only, no dependencies) is the deterministic findings layer — it classifies each document as an identity or trust policy and flags the known-dangerous patterns. Claude never invents findings the policy text doesn't support.
 
 **One policy, one verdict.** Every policy document is scored independently through three lenses — least privilege, escalation paths, and blast radius. When several are present, they are never combined or rolled up into a single verdict.
 

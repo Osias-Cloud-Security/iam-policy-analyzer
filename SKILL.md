@@ -13,13 +13,20 @@ Statically assess one or more AWS IAM policy documents and report each one's sec
 
 1. **Identify and extract every policy document.** A single pasted policy needs no extraction. If the input *defines* policies (any Terraform `.tf` file, CloudFormation template, several JSON policies, etc.), extract each to standard IAM-policy JSON per `reference/extraction.md` and build a **manifest** — a JSON array of `{"source": "<where it came from>", "policy": <policy>}`. Follow extraction.md's rule for unresolved references: a policy whose load-bearing fields (`Action`/`Effect`/`Principal`) are unresolved is **un-analyzable**, not clean. Never fabricate, silently drop, or over-claim a policy.
 
-2. **Run the deterministic engine** — the factual ground truth; never skip it. Pass policy files directly, or pipe the manifest in:
+2. **Run the deterministic engine** — it identifies the supported high-risk patterns and gives reproducible findings that anchor the report; never skip it. Pass policy files directly, or pipe the manifest in:
    ```bash
    python3 scripts/analyze_policy.py policy1.json policy2.json
    # or, with the manifest you built during extraction:
    echo "$MANIFEST_JSON" | python3 scripts/analyze_policy.py
    ```
-   It returns `{"policies": [ {source, policy_type, valid, parse_error, findings[], summary.risk_level}, ... ]}`, one entry per policy document. `policy_type` is `identity`, `trust`, or `resource`. A `resource` entry is a *service* resource-based policy (S3/KMS/SQS/SNS/Lambda/DynamoDB) — **out of scope**: it has `risk_level: NOT_ANALYZED`, no findings, and a `note`; report it as "not analyzed (resource-based policy, out of scope)" and move on. Each finding has an `id`, `severity`, `title`, `description`, and `statement_index`. For any entry where `valid` is `false`, report its `parse_error` for that source and continue with the others. See `reference/finding-catalog.md` for what each finding `id` means and the severity rules.
+   It returns `{"policies": [ {source, policy_type, valid, analysis_status, parse_error, findings[], summary.risk_level, explicit_deny_present, ...}, ... ]}`, one entry per policy document. `policy_type` is `identity`, `trust`, or `resource`.
+
+   **Check `analysis_status` before risk_level — they are separate:**
+   - `COMPLETE` — every statement was analyzable; use `summary.risk_level` (`LOW`/`MEDIUM`/`HIGH`/`CRITICAL`).
+   - `INVALID` — the policy is malformed (bad JSON, no `Statement`, or a statement that violates the IAM schema — not an object, missing/invalid `Effect`, missing `Action`/`Resource`, wrong types). `risk_level` is `null` and `invalid_statements` lists each offending statement and why. **Do not score it.** Report that the policy cannot be analyzed as written, name the bad statement(s) from `invalid_statements`, and tell the user to fix and resubmit. A malformed policy is **not** "clean."
+   - `NOT_ANALYZED` — a *service* resource-based policy (S3/KMS/SQS/SNS/Lambda/DynamoDB), **out of scope**: `risk_level` is `null`, no findings, a `note`. Report it as "not analyzed (resource-based policy, out of scope)" and move on.
+
+   Each finding has an `id`, `category` (`SECURITY_RISK`/`BROAD_PERMISSION`/`PRIVILEGE_ESCALATION`/`SENSITIVE_CAPABILITY`), `severity`, `title`, `description`, and `statement_index`. `explicit_deny_present` flags that the policy has `Deny` statements the engine did **not** evaluate — it lints Allow grants only and does not compute net effective permissions. See `reference/finding-catalog.md` for what each finding `id` means and the severity rules.
 
 3. **Reason and phrase the report** using `reference/analysis-rubric.md`, **per policy**. Anchor every finding to the engine output; you may add a finding only if the policy text plainly supports it. Apply the three lenses (least privilege / escalation / blast radius), cautious phrasing, and the read-only exclusions. For a `trust` policy, use the rubric's **Trust policies** section — the lenses are driven by the `Principal` and its `Condition`, and blast radius is a conditional note (it depends on the role's permission policies, evaluated separately — never combine them). Do **not** invent context or claim definitive compromise unless that policy alone grants unrestricted admin (`Action:"*"` + `Resource:"*"`, no conditions).
 

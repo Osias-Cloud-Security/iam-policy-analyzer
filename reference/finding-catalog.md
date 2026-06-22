@@ -15,8 +15,50 @@ result carries a `policy_type`:
 - **`resource`** — has a `Principal` and other actions: a *service* resource-based
   policy (S3 bucket, KMS key, SQS, SNS, Lambda, DynamoDB, …). **Out of scope** —
   this skill is strictly IAM identity + role trust policies. The engine does not
-  analyze it: it returns `risk_level: NOT_ANALYZED`, no findings, and a `note`.
-  Report it as "not analyzed (resource-based policy, out of scope)."
+  analyze it: it returns `analysis_status: NOT_ANALYZED`, `risk_level: null`, no
+  findings, and a `note`. Report it as "not analyzed (resource-based policy, out
+  of scope)."
+
+## Analysis status (`analysis_status`)
+
+Separate from risk. Always check it before reading `summary.risk_level`:
+
+- **`COMPLETE`** — every statement was structurally analyzable; `risk_level` is
+  `LOW`/`MEDIUM`/`HIGH`/`CRITICAL`.
+- **`INVALID`** — the document is malformed (bad JSON, no `Statement`) **or** a
+  statement violates the IAM schema: not a JSON object, missing/invalid `Effect`,
+  neither `Action` nor `NotAction`, neither `Resource` nor `NotResource` (identity)
+  / neither `Principal` nor `NotPrincipal` (trust), or an invalid type for
+  `Action`/`Resource`/`Principal`/`Condition`. AWS would reject such a policy, so
+  the engine **stops and does not score a subset** — `risk_level` is `null`,
+  findings is empty, and `invalid_statements` lists each offending
+  `{statement_index, reason}`. A malformed policy is **not** LOW/clean.
+- **`NOT_ANALYZED`** — out-of-scope resource-based policy (above); `risk_level` null.
+
+The engine never returns PARTIAL. An unresolved-but-valid policy (Terraform `var`,
+CFN intrinsic) is handled at extraction (`reference/extraction.md`) and must not
+reach the engine as a half-policy. A statement the engine simply has no *rule*
+for is still `COMPLETE` — "malformed" means a schema violation, not "unsupported."
+
+## Finding fields
+
+Each finding carries an `id`, a `category`, a `severity`, a `title`, a
+`description`, and a `statement_index`. The `category` separates genuine defects
+from powerful-but-scoped capabilities:
+
+- **`SECURITY_RISK`** — a broad/unsafe grant that is a defect on its own
+  (`FULL_ADMIN`, wildcard combos, `NotAction`/`NotResource`, wildcard/account-root
+  trust).
+- **`BROAD_PERMISSION`** — wildcard breadth (`SERVICE_WILDCARD_*`, broad S3 data).
+- **`PRIVILEGE_ESCALATION`** — can be chained to higher privilege (`IAM_PASSROLE`,
+  `IAM_POLICY_MUTATION`, `COMPUTE_ROLE_INJECTION`, unscoped trust/federation).
+- **`SENSITIVE_CAPABILITY`** — a sensitive but **scoped** capability (a scoped
+  `sts:AssumeRole`, secret read, or compute action). Review, not a vulnerability —
+  do not describe it as a defect.
+
+`explicit_deny_present` (top-level) flags that the policy has `Deny` statements
+the engine did **not** evaluate; `effective_permissions_calculated` is always
+`false` — the engine lints Allow grants, it does not compute net permissions.
 
 ## Severity assignment
 
@@ -85,14 +127,16 @@ Effective scoping is then tiered:
 | `TRUST_PRINCIPAL_WILDCARD` | `Principal` is `"*"` or `{"AWS":"*"}` | least-privilege | **CRITICAL** if no effective scoping · **HIGH** if broad · **MEDIUM** if precise (wildcard-plus-condition is fragile; never auto-LOW) |
 | `TRUST_ACCOUNT_ROOT` | AWS principal is an account-root ARN (`…:root`) or bare 12-digit account id (trusts the whole account) | least-privilege | HIGH if no effective scoping; MEDIUM if scoped |
 | `TRUST_CROSS_ACCOUNT_NO_EXTERNALID` | Account-wide AWS principal (above) **and** no effective confused-deputy guard. Does not fire for wildcard (already covered) | escalation | HIGH |
-| `TRUST_FEDERATED_UNSCOPED` | Web-identity/OIDC federation (`sts:AssumeRoleWithWebIdentity` or an `:oidc-provider/` principal) **and** no `:sub`/`:aud` Condition present | escalation | HIGH |
+| `TRUST_FEDERATED_UNSCOPED` | Web-identity/OIDC federation (`sts:AssumeRoleWithWebIdentity` or an `:oidc-provider/` principal) with no **effective** `:sub`/`:aud` Condition — absent, or present but a bare wildcard value (`"*"`) | escalation | HIGH |
 | `TRUST_SAML_UNSCOPED` | SAML federation (`sts:AssumeRoleWithSAML` or a `:saml-provider/` principal) **and** no `saml:aud` Condition present | escalation | MEDIUM |
 | `TRUST_NOTPRINCIPAL` | An `Allow` statement uses `NotPrincipal` (trusts everyone *except* the listed principals — AWS recommends never doing this) | least-privilege | **CRITICAL** if no effective scoping; **HIGH** if scoped |
 
 Service principals (`ec2.amazonaws.com`, `lambda.amazonaws.com`, …) are normal
-and not flagged. The federation `:sub`/`:aud` and `saml:aud` checks are
-presence-based (a repo-scoped `:sub` with a branch wildcard is legitimately
-scoped), so value inspection is not applied there.
+and not flagged. The OIDC `:sub`/`:aud` check credits any value except a bare
+wildcard (`"*"`) — a repo-scoped `:sub` with a branch wildcard
+(`repo:org/app:ref:refs/heads/*`) is legitimately scoped and stays clean, but a
+`:sub` of `"*"` is treated as unscoped. The SAML `saml:aud` check is
+presence-based.
 
 **On `ForAllValues` and multi-key conditions:** the classifier never credits a
 `ForAllValues:` set match as scoping — a bare `ForAllValues` evaluates *true*
@@ -104,10 +148,14 @@ for it in judgment if you see one.
 
 ## Notes for the model layer
 
-- A single statement commonly produces several findings (e.g. an admin statement
-  fires `FULL_ADMIN` plus every `SERVICE_WILDCARD_*`). When writing the report,
-  **consolidate** these into one least-privilege/blast-radius point per root cause
-  rather than echoing each row — see `analysis-rubric.md`.
+- The engine already consolidates `FULL_ADMIN`: when a statement is
+  `Action:"*"` + `Resource:"*"`, the breadth findings it covers
+  (`SERVICE_WILDCARD_*`, `BROAD_S3_DATA_ACCESS`, `WILDCARD_ACTIONS_AND_RESOURCES`,
+  `WRITE_ON_ALL_RESOURCES`) are dropped for that statement and the affected
+  services are folded into `FULL_ADMIN.metadata.affected_services`. A statement
+  can still produce several distinct findings (e.g. escalation + breadth); when
+  writing the report, **consolidate** them into one point per root cause rather
+  than echoing each row — see `analysis-rubric.md`.
 - **The deterministic rules are seed signal, not the whole analysis.** They cover
   the high-confidence, well-known cases; they are deliberately *not* exhaustive.
   Apply your own judgment from AWS documentation and training to extend them — e.g.

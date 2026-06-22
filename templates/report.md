@@ -10,9 +10,11 @@
 
 **Type:** {identity | trust} &nbsp;·&nbsp; **Risk level (this policy only):** {LOW | MEDIUM | HIGH | CRITICAL}
 
-<!-- A `resource` policy (S3/KMS/SQS/SNS/Lambda/DynamoDB resource-based policy) is
-     OUT OF SCOPE: report it as "Not analyzed — resource-based policy, out of
-     scope for this skill" with no risk rating, and move on. -->
+<!-- Only use the sections below when analysis_status is COMPLETE. Otherwise give
+     no risk rating and state the reason:
+     - INVALID: malformed policy AWS would reject — name each invalid_statements
+       entry (index + reason) and ask the user to fix and resubmit.
+     - NOT_ANALYZED: resource-based policy, out of scope. -->
 
 
 > One or two sentences of plain-language summary: what this policy is broadly
@@ -66,7 +68,10 @@ This assessment is based solely on this policy document. The following context
 was not available:
 
 - Policy attachment context (user, role, group) is unknown.
-- No visibility into SCPs or permission boundaries.
+- Other identity policies, permission boundaries, and SCPs are not visible.
+- Session policies and resource-based policies are not visible.
+- {If explicit_deny_present: Explicit Deny statements were not evaluated for net effect.}
+- {Trust policies: the role's other policies, trust relationships, and cross-account ownership are unknown.}
 - Actual resource usage and data sensitivity are not known.
 - {If extraction was partial: name the unresolved values — variables,
   interpolations, intrinsics, unread files — and note the assessment is partial.}
