@@ -20,13 +20,8 @@
 > One or two sentences of plain-language summary: what this policy is broadly
 > able to do (identity) or who it lets assume the role (trust). No jargon.
 
-<!-- TRUST POLICIES: keep all three sections below.
-     - Least Privilege  = breadth of trust (wildcard / account-root / NotPrincipal)
-     - Escalation Paths = unintended principal can assume it (confused deputy,
-       unscoped OIDC/SAML)
-     - Blast Radius     = CONDITIONAL NOTE: "anyone who can assume this gains the
-       role's full permissions; impact depends on its permission policies,
-       evaluated separately." Do not combine with other policies. -->
+<!-- TRUST POLICIES: keep all three sections; drive them from the Principal/Condition
+     per analysis.md Part 2 ("Trust policies"). Blast Radius is a conditional note. -->
 
 
 ## Least Privilege
@@ -64,23 +59,16 @@
 
 ## Analysis Limitations
 
-This assessment is based solely on this policy document. The following context
-was not available:
+This assessment is based solely on this policy document. List the relevant items
+from analysis.md Part 2 ("Analysis limitations"), e.g.:
 
 - Policy attachment context (user, role, group) is unknown.
-- Other identity policies, permission boundaries, and SCPs are not visible.
-- Session policies and resource-based policies are not visible.
+- Other identity policies, permission boundaries, SCPs, and session policies are not visible.
 - {If explicit_deny_present: Explicit Deny statements were not evaluated for net effect.}
-- {Trust policies: the role's other policies, trust relationships, and cross-account ownership are unknown.}
-- Actual resource usage and data sensitivity are not known.
-- {If extraction was partial: name the unresolved values — variables,
-  interpolations, intrinsics, unread files — and note the assessment is partial.}
+- {If extraction was partial: name the unresolved values and note the assessment is partial.}
 
 ---
 
 _Repeat the block above for each policy document. Do not add an overall or
-aggregate verdict across policies._
-
-**Phrasing reminders:** cautious language ("can enable", "may allow"); no
-absolute compromise claims unless `Action:"*"` + `Resource:"*"` with no
-conditions; plain language first; never expose internal tooling terms.
+aggregate verdict across policies. Follow analysis.md Part 2 for cautious phrasing
+and voice._

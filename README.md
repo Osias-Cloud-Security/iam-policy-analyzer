@@ -25,12 +25,11 @@ iam-policy-analyzer/
   SKILL.md                       # entry point: the analysis workflow + when to use it
   scripts/analyze_policy.py      # deterministic rule engine (Python stdlib only, no dependencies)
   reference/extraction.md        # how to pull policies from JSON / Terraform / CloudFormation
-  reference/analysis-rubric.md   # how to phrase findings — the three lenses + cautious phrasing
-  reference/finding-catalog.md   # every finding id, its trigger, and severity logic
+  reference/analysis.md          # every finding id + severity logic, and how to write the report
   templates/report.md            # output skeleton (one block per policy)
 ```
 
-You get a per-policy risk level (LOW / MEDIUM / HIGH / CRITICAL) and specific fixes — without false positives on routine read-only access. See [`reference/finding-catalog.md`](reference/finding-catalog.md) for the full list of findings and severity rules.
+You get a per-policy risk level (LOW / MEDIUM / HIGH / CRITICAL) and specific fixes — without false positives on routine read-only access. See [`reference/analysis.md`](reference/analysis.md) for the full list of findings and severity rules.
 
 ---
 

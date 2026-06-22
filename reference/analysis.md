@@ -1,12 +1,20 @@
-# Finding Catalog
+# IAM Analysis Reference
 
-What each deterministic finding `id` from `scripts/analyze_policy.py` means, and
-how severity is assigned. Each finding carries the `statement_index` it came from.
+Single source of truth for **(1)** what the deterministic engine
+(`scripts/analyze_policy.py`) emits and what each finding means, and **(2)** how
+to turn that output into a per-policy report. The engine code is the behavioral
+source of truth; this doc documents it — keep them in sync.
+
+---
+
+# Part 1 — Engine output
+
+What each finding `id` means and how severity is assigned. Each finding carries
+the `statement_index` it came from.
 
 ## Policy classification (`policy_type`)
 
-The engine classifies each document and routes it to the matching rule set. The
-result carries a `policy_type`:
+The engine classifies each document and routes it to the matching rule set:
 
 - **`identity`** — no `Principal` element. Permissions attached to a user/role/
   group. Scored by the identity findings below (Action/Resource based).
@@ -14,10 +22,9 @@ result carries a `policy_type`:
   policy. Scored by the trust findings below (Principal/Condition based).
 - **`resource`** — has a `Principal` and other actions: a *service* resource-based
   policy (S3 bucket, KMS key, SQS, SNS, Lambda, DynamoDB, …). **Out of scope** —
-  this skill is strictly IAM identity + role trust policies. The engine does not
-  analyze it: it returns `analysis_status: NOT_ANALYZED`, `risk_level: null`, no
-  findings, and a `note`. Report it as "not analyzed (resource-based policy, out
-  of scope)."
+  this skill is strictly IAM identity + role trust policies. The engine returns
+  `analysis_status: NOT_ANALYZED`, `risk_level: null`, no findings, and a `note`.
+  Report it as "not analyzed (resource-based policy, out of scope)."
 
 ## Analysis status (`analysis_status`)
 
@@ -36,9 +43,9 @@ Separate from risk. Always check it before reading `summary.risk_level`:
 - **`NOT_ANALYZED`** — out-of-scope resource-based policy (above); `risk_level` null.
 
 The engine never returns PARTIAL. An unresolved-but-valid policy (Terraform `var`,
-CFN intrinsic) is handled at extraction (`reference/extraction.md`) and must not
-reach the engine as a half-policy. A statement the engine simply has no *rule*
-for is still `COMPLETE` — "malformed" means a schema violation, not "unsupported."
+CFN intrinsic) is handled at extraction (`extraction.md`) and must not reach the
+engine as a half-policy. A statement the engine simply has no *rule* for is still
+`COMPLETE` — "malformed" means a schema violation, not "unsupported."
 
 ## Finding fields
 
@@ -51,7 +58,8 @@ from powerful-but-scoped capabilities:
   trust).
 - **`BROAD_PERMISSION`** — wildcard breadth (`SERVICE_WILDCARD_*`, broad S3 data).
 - **`PRIVILEGE_ESCALATION`** — can be chained to higher privilege (`IAM_PASSROLE`,
-  `IAM_POLICY_MUTATION`, `COMPUTE_ROLE_INJECTION`, unscoped trust/federation).
+  `IAM_POLICY_MUTATION`, `CREDENTIAL_ESCALATION`, `COMPUTE_ROLE_INJECTION`,
+  unscoped trust/federation).
 - **`SENSITIVE_CAPABILITY`** — a sensitive but **scoped** capability (a scoped
   `sts:AssumeRole`, secret read, or compute action). Review, not a vulnerability —
   do not describe it as a defect.
@@ -147,16 +155,13 @@ errs toward *over*-flagging, never a false clean. The lone over-rated case is a
 `ForAllValues` correctly paired with a `Null …:false` guard (rare here) — account
 for it in judgment if you see one.
 
-## Notes for the model layer
+## Engine notes
 
 - The engine already consolidates `FULL_ADMIN`: when a statement is
   `Action:"*"` + `Resource:"*"`, the breadth findings it covers
   (`SERVICE_WILDCARD_*`, `BROAD_S3_DATA_ACCESS`, `WILDCARD_ACTIONS_AND_RESOURCES`,
   `WRITE_ON_ALL_RESOURCES`) are dropped for that statement and the affected
-  services are folded into `FULL_ADMIN.metadata.affected_services`. A statement
-  can still produce several distinct findings (e.g. escalation + breadth); when
-  writing the report, **consolidate** them into one point per root cause rather
-  than echoing each row — see `analysis-rubric.md`.
+  services are folded into `FULL_ADMIN.metadata.affected_services`.
 - **The deterministic rules are seed signal, not the whole analysis.** They cover
   the high-confidence, well-known cases; they are deliberately *not* exhaustive.
   Apply your own judgment from AWS documentation and training to extend them — e.g.
@@ -170,7 +175,7 @@ for it in judgment if you see one.
   (already flagged) attaches it. The standalone IAM-mutation primitives are
   `iam:CreatePolicyVersion` / `SetDefaultPolicyVersion` (they change an
   already-attached policy).
-- "Read-only" (for the write-on-`*` gate) = the action verb starts with
+- **"Read-only"** (for the write-on-`*` gate) = the action verb starts with
   `describe`, `get`, `list`, `lookup`, or `view`; `*` is non-read-only. This
   prefix test is about **control-plane/metadata** reads. **Data-plane reads**
   (reading object/item/secret *contents*) are NOT safe just because the verb is
@@ -193,3 +198,136 @@ for it in judgment if you see one.
   permissions, so its blast radius = "whoever can now assume it gains the role's
   full permission set," whose magnitude lives in the role's *separate* permission
   policies. Report it as a conditional note, not a combined verdict.
+
+---
+
+# Part 2 — Writing the report
+
+When the engine returns several policies, write one independent assessment per
+policy document (labeled by its `source`). Everything below applies **within a
+single policy** — do not combine findings, severities, or recommendations across
+policies, and do not produce an aggregate verdict.
+
+## Grounding rules
+
+- **Check `analysis_status` first** (see Part 1). Only write a risk assessment
+  when it is `COMPLETE`. `INVALID` → report that the policy is malformed and was
+  not scored, name the offending statement(s) from `invalid_statements`, and ask
+  the user to fix and resubmit (do **not** call it LOW/clean). `NOT_ANALYZED` →
+  report as out of scope.
+- The engine findings are the reproducible basis the report is built on. Summarize
+  and organize them; only add a finding if the **policy text plainly supports it**.
+  Never pad to look thorough.
+- **The engine lints Allow grants only.** When `explicit_deny_present` is true,
+  note that the policy also has `Deny` statements whose net effect was not
+  evaluated, so a flagged Allow may be narrowed by a Deny.
+- Analysis is based **only on the submitted policy** — you do not see attachments,
+  SCPs, permission boundaries, session policies, resource configs, or runtime
+  usage. Do not assume any of it.
+- Consolidate findings that share one root cause into a single item — don't list
+  the same underlying problem twice in different words. Return an **empty list**
+  for any section with no real findings.
+- Actions are the core signal (Part 1): analyze from the actions even when the
+  `Resource` is unresolved; note scope is unknown rather than assuming `"*"`.
+
+## The three lenses (do not repeat a finding across sections)
+
+1. **Least privilege violations** — *scope only.* Are actions and resources scoped
+   to the minimum necessary? Overly broad actions/resources, missing resource
+   constraints, unnecessary access to sensitive services. No impact or attack
+   chains. Severity LOW/MEDIUM/HIGH.
+
+2. **Privilege escalation paths** — *mechanism only.* Can permissions be chained
+   to gain higher privilege than intended? Include **only** when permissions
+   clearly enable it: `iam:PassRole`, `iam:CreatePolicyVersion`/
+   `SetDefaultPolicyVersion`, `iam:AttachRolePolicy`/`PutRolePolicy`, broad
+   `sts:AssumeRole`, credential-access primitives (`iam:CreateAccessKey`,
+   `Create`/`UpdateLoginProfile`, `AddUserToGroup`, `UpdateAssumeRolePolicy` —
+   escalation only when the target can be more privileged, i.e. broad `Resource`),
+   or role-injection via a service that runs code under a passed role. Describe the
+   **specific capability** ("could allow attaching policies to any role"), not a
+   blanket claim, and weigh `Resource` scope — a tightly-scoped PassRole or
+   credential action limits the escalation. Severity MEDIUM/HIGH/CRITICAL.
+
+3. **Blast radius risks** — *impact only.* If these credentials were stolen, what
+   is the realistic damage to data, services, or account integrity? Describe
+   outcomes, not mechanisms or scope. Conservative, scoped to what the policy
+   directly enables. Severity LOW/MEDIUM/HIGH.
+
+## Trust policies (`policy_type: trust`)
+
+A trust policy answers *who may assume the role*, so the same three lenses are
+driven by the `Principal` and its `Condition` scoping. **Keep all three sections**:
+
+- **Least privilege** — breadth of trust: `TRUST_PRINCIPAL_WILDCARD`,
+  `TRUST_ACCOUNT_ROOT`, `TRUST_NOTPRINCIPAL`.
+- **Escalation paths** — an *unintended* principal can assume the role and inherit
+  its permissions: `TRUST_CROSS_ACCOUNT_NO_EXTERNALID` (confused deputy),
+  `TRUST_FEDERATED_UNSCOPED` (e.g. any repo via OIDC), `TRUST_SAML_UNSCOPED`.
+- **Blast radius** — *conditional note, not a combined verdict.* Whoever can assume
+  the role gains its **entire permission set**; the magnitude depends on the role's
+  permission policies, evaluated **separately** (do not connect them). If there are
+  no trust findings, say the trust appears appropriately scoped.
+
+Do not flag the expected `sts:AssumeRole` action or normal service principals.
+
+## Cautious phrasing (required)
+
+- Prefer "can enable", "may allow", "could permit", "materially increases the risk
+  of" over absolutes like "allows", "achieves", "full compromise".
+- Do **not** present hypothetical downstream impact as certain when it depends on
+  unknown trust policies, role inventory, SCPs, boundaries, resource sensitivity,
+  or runtime context.
+- Never write "full privilege escalation path exists" / "full account compromise"
+  unless the policy alone grants effectively unrestricted admin (`Action:"*"` and
+  `Resource:"*"` with no conditions).
+- Titles: one line, under ~8 words, no trailing punctuation, no absolute language.
+
+## IAM semantics to respect
+
+- Explicit `Deny` overrides `Allow`.
+- `Condition` blocks may meaningfully restrict access — account for them.
+- `NotAction` / `NotResource` broaden scope and need careful interpretation.
+- Wildcard permissions significantly increase risk.
+
+## Exclusions
+
+- Do not flag standard **metadata/control-plane** reads (the read-only verbs in
+  Part 1) unless combined with write, delete, or mutation actions. But a
+  `Get`/`Query`/`Scan` that reads **data contents** at scale (e.g. `dynamodb:Scan`,
+  `s3:GetObject`, secret reads on `Resource:"*"`) is a real exposure — judge by
+  what is read, not the verb prefix.
+- Do not surface findings about the **absence** of permissions — only flag what the
+  policy explicitly allows that is dangerous.
+
+## Voice
+
+Write as a security engineer for a technical-but-not-specialist reader. Plain
+language first. Avoid internal tooling terms ("deterministic", "rule engine",
+"check", "mismatch") in the finished report.
+
+## Recommendations
+
+Actionable and specific — reference the exact action or resource pattern to fix.
+Prioritize least privilege and scoping. Consolidate recommendations that share the
+same root fix. Priority is LOW/MEDIUM/HIGH.
+
+## LOW risk wording (required)
+
+A `COMPLETE` result with no findings means *no supported high-risk pattern was
+found* — not that the policy is proven safe. Phrase it that way, e.g.:
+
+> No supported high-risk patterns were detected in this policy. This does not
+> establish complete least privilege or account-level safety.
+
+Never imply a LOW policy is audited-clean or minimal.
+
+## Analysis limitations (always include)
+
+Close with the relevant items naming context you could not see, e.g.:
+- "Policy attachment context (user, role, group) is unknown."
+- "Other identity policies, permission boundaries, and SCPs are not visible."
+- "Session policies and resource-based policies are not visible."
+- "Explicit Deny statements were not evaluated for net effect."
+- "Trust relationships, cross-account ownership, and the role's other policies are unknown."
+- "Actual resource usage and data sensitivity are not known."

@@ -19,16 +19,9 @@ Statically assess one or more AWS IAM policy documents and report each one's sec
    # or, with the manifest you built during extraction:
    echo "$MANIFEST_JSON" | python3 scripts/analyze_policy.py
    ```
-   It returns `{"policies": [ {source, policy_type, valid, analysis_status, parse_error, findings[], summary.risk_level, explicit_deny_present, ...}, ... ]}`, one entry per policy document. `policy_type` is `identity`, `trust`, or `resource`.
+   It returns `{"policies": [ {source, policy_type, valid, analysis_status, parse_error, findings[], summary.risk_level, explicit_deny_present, ...}, ... ]}`, one entry per policy document. **Check `analysis_status` before `risk_level` — only `COMPLETE` carries a real risk level. `INVALID` (malformed — `risk_level` null, see `invalid_statements`) and `NOT_ANALYZED` (out-of-scope resource policy) must never be reported as clean/LOW.** See `reference/analysis.md` (Part 1) for the full output schema, every finding `id`, the categories, and severity rules.
 
-   **Check `analysis_status` before risk_level — they are separate:**
-   - `COMPLETE` — every statement was analyzable; use `summary.risk_level` (`LOW`/`MEDIUM`/`HIGH`/`CRITICAL`).
-   - `INVALID` — the policy is malformed (bad JSON, no `Statement`, or a statement that violates the IAM schema — not an object, missing/invalid `Effect`, missing `Action`/`Resource`, wrong types). `risk_level` is `null` and `invalid_statements` lists each offending statement and why. **Do not score it.** Report that the policy cannot be analyzed as written, name the bad statement(s) from `invalid_statements`, and tell the user to fix and resubmit. A malformed policy is **not** "clean."
-   - `NOT_ANALYZED` — a *service* resource-based policy (S3/KMS/SQS/SNS/Lambda/DynamoDB), **out of scope**: `risk_level` is `null`, no findings, a `note`. Report it as "not analyzed (resource-based policy, out of scope)" and move on.
-
-   Each finding has an `id`, `category` (`SECURITY_RISK`/`BROAD_PERMISSION`/`PRIVILEGE_ESCALATION`/`SENSITIVE_CAPABILITY`), `severity`, `title`, `description`, and `statement_index`. `explicit_deny_present` flags that the policy has `Deny` statements the engine did **not** evaluate — it lints Allow grants only and does not compute net effective permissions. See `reference/finding-catalog.md` for what each finding `id` means and the severity rules.
-
-3. **Reason and phrase the report** using `reference/analysis-rubric.md`, **per policy**. Anchor every finding to the engine output; you may add a finding only if the policy text plainly supports it. Apply the three lenses (least privilege / escalation / blast radius), cautious phrasing, and the read-only exclusions. For a `trust` policy, use the rubric's **Trust policies** section — the lenses are driven by the `Principal` and its `Condition`, and blast radius is a conditional note (it depends on the role's permission policies, evaluated separately — never combine them). Do **not** invent context or claim definitive compromise unless that policy alone grants unrestricted admin (`Action:"*"` + `Resource:"*"`, no conditions).
+3. **Reason and phrase the report**, **per policy**, using `reference/analysis.md` (Part 2): anchor every finding to the engine output (add one only if the policy text plainly supports it), apply the three lenses (least privilege / escalation / blast radius), cautious phrasing, and the read-only exclusions. Do **not** invent context or claim definitive compromise unless that policy alone grants unrestricted admin (`Action:"*"` + `Resource:"*"`, no conditions).
 
 4. **Emit the report** following `templates/report.md`: one independent assessment block per policy (labeled by its `source`), each with the three analysis sections, prioritized recommendations, and an Analysis Limitations list naming the context you could not see. Do not produce a combined or aggregate verdict across policies.
 
@@ -36,13 +29,8 @@ Statically assess one or more AWS IAM policy documents and report each one's sec
 
 If an AWS documentation tool is available in the session (e.g. the AWS MCP `search_documentation` / `read_documentation`), use it to verify uncertain specifics rather than relying on memory — condition-key semantics, whether a service action passes a role, exact action names, current best practice. Use **only** these read-only documentation lookups. **Never** call live-account AWS APIs or run AWS commands: this skill performs **static analysis of the policy text only and must not connect to any AWS account.** If no documentation tool is available, fall back to training knowledge — the skill is fully self-contained without it.
 
-## When NOT to flag
-
-Standard read-only `describe`/`list`/`get` permissions are expected in audit roles — do not flag them unless combined with write, delete, or mutation actions. Do not surface the *absence* of permissions as a finding. In a trust policy, the `sts:AssumeRole` action and normal service principals (`ec2.amazonaws.com`, etc.) are expected — don't flag them; the risk is in a broad or unscoped `Principal`.
-
 ## Maintenance
 
-The deterministic engine (`scripts/analyze_policy.py`), the finding catalog
-(`reference/finding-catalog.md`), and the rubric (`reference/analysis-rubric.md`)
-describe the same rule set. If you change one, update the others so the
-documented severity logic stays in sync with the code.
+`scripts/analyze_policy.py` is the behavioral source of truth; `reference/analysis.md`
+documents it (findings, severities, and how to write the report). If you change
+one, update the other so they stay in sync.
