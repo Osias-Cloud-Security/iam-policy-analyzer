@@ -11,7 +11,7 @@ Statically assess one or more AWS IAM policy documents and report each one's sec
 
 ## Workflow
 
-1. **Identify and extract every policy document.** A single pasted policy needs no extraction. If the input *defines* policies (any Terraform `.tf` file, CloudFormation template, several JSON policies, etc.), extract each to standard IAM-policy JSON per `reference/extraction.md` and build a **manifest** — a JSON array of `{"source": "<where it came from>", "policy": <policy>}`. Follow extraction.md's rule for unresolved references: a policy whose load-bearing fields (`Action`/`Effect`/`Principal`) are unresolved is **un-analyzable**, not clean. Never fabricate, silently drop, or over-claim a policy.
+1. **Identify and extract every policy document.** A single pasted policy needs no extraction. If the input *defines* policies (any Terraform `.tf` file, CloudFormation template, several JSON policies, etc.), extract each to standard IAM-policy JSON per `reference/extraction.md` and build a **manifest** — a JSON array of `{"source": "<where it came from>", "policy": <policy>}`. Follow `reference/extraction.md`'s rule for unresolved references: a policy whose load-bearing fields (`Action`/`Effect`/`Principal`) are unresolved is **un-analyzable**, not clean. Never fabricate, silently drop, or over-claim a policy.
 
 2. **Run the deterministic engine** — it identifies the supported high-risk patterns and gives reproducible findings that anchor the report; never skip it. Pass policy files directly, or pipe the manifest in:
    ```bash
@@ -19,9 +19,9 @@ Statically assess one or more AWS IAM policy documents and report each one's sec
    # or, with the manifest you built during extraction:
    echo "$MANIFEST_JSON" | python3 scripts/analyze_policy.py
    ```
-   It returns `{"policies": [ {source, policy_type, valid, analysis_status, parse_error, findings[], summary.risk_level, explicit_deny_present, ...}, ... ]}`, one entry per policy document. **Check `analysis_status` before `risk_level` — only `COMPLETE` carries a real risk level. `INVALID` (malformed — `risk_level` null, see `invalid_statements`) and `NOT_ANALYZED` (out-of-scope resource policy) must never be reported as clean/LOW.** See `reference/analysis.md` (Part 1) for the full output schema, every finding `id`, the categories, and severity rules.
+   It returns `{"policies": [ {source, policy_type, valid, analysis_status, parse_error, findings[], summary.risk_level, explicit_deny_present, ...}, ... ]}`, one entry per policy document. **Check `analysis_status` before `risk_level` — only `COMPLETE` carries a real risk level. `INVALID` (malformed — `risk_level` null, see `invalid_statements`) and `NOT_ANALYZED` (out-of-scope resource policy) must never be reported as clean/LOW.** See `reference/analysis.md` → Part 1 for the full output schema, every finding `id`, the categories, and severity rules.
 
-3. **Reason and phrase the report**, **per policy**, using `reference/analysis.md` (Part 2): anchor every finding to the engine output (add one only if the policy text plainly supports it), apply the three lenses (least privilege / escalation / blast radius), cautious phrasing, and the read-only exclusions. Do **not** invent context or claim definitive compromise unless that policy alone grants unrestricted admin (`Action:"*"` + `Resource:"*"`, no conditions).
+3. **Reason and phrase the report**, **per policy**, using `reference/analysis.md` → Part 2: anchor every finding to the engine output (add one only if the policy text plainly supports it), apply the three lenses (least privilege / escalation / blast radius), cautious phrasing, and the read-only exclusions. Do **not** invent context or claim definitive compromise unless that policy alone grants unrestricted admin (`Action:"*"` + `Resource:"*"`, no conditions).
 
 4. **Emit the report** following `templates/report.md`: one independent assessment block per policy (labeled by its `source`), each with the three analysis sections, prioritized recommendations, and an Analysis Limitations list naming the context you could not see. Do not produce a combined or aggregate verdict across policies.
 
@@ -31,6 +31,5 @@ If an AWS documentation tool is available in the session (e.g. the AWS MCP `sear
 
 ## Maintenance
 
-`scripts/analyze_policy.py` is the behavioral source of truth; `reference/analysis.md`
-documents it (findings, severities, and how to write the report). If you change
-one, update the other so they stay in sync.
+See `README.md` → Maintenance for keeping the engine (`scripts/analyze_policy.py`)
+and the reference docs in sync.
