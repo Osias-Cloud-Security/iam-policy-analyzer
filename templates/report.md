@@ -21,7 +21,7 @@
 > able to do (identity) or who it lets assume the role (trust). No jargon.
 
 <!-- TRUST POLICIES: keep all three sections; drive them from the Principal/Condition
-     per analysis.md Part 2 ("Trust policies"). Blast Radius is a conditional note. -->
+     per `reference/analysis.md` → Part 2 ("Trust policies"). Blast Radius is a conditional note. -->
 
 
 ## Least Privilege
@@ -60,7 +60,7 @@
 ## Analysis Limitations
 
 This assessment is based solely on this policy document. List the relevant items
-from analysis.md Part 2 ("Analysis limitations"), e.g.:
+from `reference/analysis.md` → Part 2 ("Analysis limitations"), e.g.:
 
 - Policy attachment context (user, role, group) is unknown.
 - Other identity policies, permission boundaries, SCPs, and session policies are not visible.
@@ -70,5 +70,5 @@ from analysis.md Part 2 ("Analysis limitations"), e.g.:
 ---
 
 _Repeat the block above for each policy document. Do not add an overall or
-aggregate verdict across policies. Follow analysis.md Part 2 for cautious phrasing
+aggregate verdict across policies. Follow `reference/analysis.md` → Part 2 for cautious phrasing
 and voice._
