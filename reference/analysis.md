@@ -3,7 +3,7 @@
 Single source of truth for **(1)** what the deterministic engine
 (`scripts/analyze_policy.py`) emits and what each finding means, and **(2)** how
 to turn that output into a per-policy report. The engine code is the behavioral
-source of truth; this doc documents it — keep them in sync.
+source of truth; this doc documents it.
 
 ---
 
@@ -11,6 +11,11 @@ source of truth; this doc documents it — keep them in sync.
 
 What each finding `id` means and how severity is assigned. Each finding carries
 the `statement_index` it came from.
+
+## What the engine does NOT do (read first)
+
+`effective_permissions_calculated` is always `false` — the engine lints Allow
+grants, it does not compute net permissions.
 
 ## Policy classification (`policy_type`)
 
@@ -43,7 +48,7 @@ Separate from risk. Always check it before reading `summary.risk_level`:
 - **`NOT_ANALYZED`** — out-of-scope resource-based policy (above); `risk_level` null.
 
 The engine never returns PARTIAL. An unresolved-but-valid policy (Terraform `var`,
-CFN intrinsic) is handled at extraction (`extraction.md`) and must not reach the
+CFN intrinsic) is handled at extraction (`reference/extraction.md`) and must not reach the
 engine as a half-policy. A statement the engine simply has no *rule* for is still
 `COMPLETE` — "malformed" means a schema violation, not "unsupported."
 
@@ -65,8 +70,7 @@ from powerful-but-scoped capabilities:
   do not describe it as a defect.
 
 `explicit_deny_present` (top-level) flags that the policy has `Deny` statements
-the engine did **not** evaluate; `effective_permissions_calculated` is always
-`false` — the engine lints Allow grants, it does not compute net permissions.
+the engine did **not** evaluate.
 
 ## Severity assignment
 
@@ -203,6 +207,14 @@ for it in judgment if you see one.
 ---
 
 # Part 2 — Writing the report
+
+> **GATE — read before writing anything about a policy.**
+> Check `analysis_status` first, every time:
+> - `COMPLETE` → assess normally (everything below applies).
+> - `INVALID` → malformed policy AWS would reject. Do **not** score it. Name each `invalid_statements` entry (index + reason) and ask the user to fix and resubmit.
+> - `NOT_ANALYZED` → out-of-scope resource-based policy. Report as out of scope, no risk rating.
+>
+> **A non-`COMPLETE` policy is never LOW, never clean.** Only after this gate passes do the three lenses below apply.
 
 When the engine returns several policies, write one independent assessment per
 policy document (labeled by its `source`). Everything below applies **within a

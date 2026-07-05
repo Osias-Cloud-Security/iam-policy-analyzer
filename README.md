@@ -91,6 +91,10 @@ Strictly IAM **identity** policies (managed or inline) and role **trust** polici
 
 The report is **AI-generated and can miss things**: it is a first-pass review, not an authoritative audit. Always have a qualified engineer review any changes before applying them.
 
+## Maintenance
+
+The engine (`scripts/analyze_policy.py`) is the behavioral source of truth. When you change it, update the reference docs (`reference/analysis.md`, `reference/extraction.md`) to match, so the documented findings, severities, and report guidance stay in sync with what the engine actually does.
+
 ## License
 
 [MIT](LICENSE).
