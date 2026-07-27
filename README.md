@@ -6,8 +6,6 @@ A Claude [Agent Skill](https://docs.claude.com/en/docs/agents-and-tools/agent-sk
 
 It pairs a **deterministic rule engine** with **model-driven write-up guidance** (clear, cautious phrasing). Everything is based solely on the policy text; it never assumes attachment context, SCPs, permission boundaries, or runtime usage.
 
-> **Claude Code only.** This is a skill for [Claude Code](https://docs.anthropic.com/en/docs/claude-code) and the Claude apps. It is not a standalone tool, and it is not compatible with Cursor, Copilot, Windsurf, or other AI coding tools.
-
 ---
 
 ## The Problem
